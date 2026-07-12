@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { longApi } from "@/api/long";
 import { Button, Card } from "@/components/ui";
 
+import type { ChangeRecord } from "@/types";
+
 const CATEGORIES = [
   { key: "outline", label: "大纲", list: longApi.outlines, nameField: "title" },
   { key: "character", label: "角色", list: longApi.characters, nameField: "name" },
@@ -15,11 +17,12 @@ interface ContextPanelProps {
   pid: string;
   open: boolean;
   onToggle: () => void;
-  onQuote: (prefix: string, name: string) => void;
+  onQuote: (kind: string, name: string) => void;
   onEdit: (kind: string, item: any) => void;
+  pendingRecords: ChangeRecord[];
 }
 
-export default function ContextPanel({ pid, open, onToggle, onQuote, onEdit }: ContextPanelProps) {
+export default function ContextPanel({ pid, open, onToggle, onQuote, onEdit, pendingRecords }: ContextPanelProps) {
   const [active, setActive] = useState("character");
   const [items, setItems] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +74,11 @@ export default function ContextPanel({ pid, open, onToggle, onQuote, onEdit }: C
               <div className="col-span-full text-xs text-accent">加载失败：{error}</div>
             )}
             {!error && items.map((it) => {
+              const kind = activeCategory.key;
               const name = it[activeCategory.nameField] || "（未命名）";
+              const isPending = pendingRecords.some(
+                (r) => r.entity_type === kind && r.entity_id === it.id
+              );
               return (
                 <Card key={it.id} className="p-2 text-xs">
                   <div className="flex items-center justify-between gap-2">
@@ -80,14 +87,15 @@ export default function ContextPanel({ pid, open, onToggle, onQuote, onEdit }: C
                       <Button
                         variant="ghost"
                         className="h-6 px-1.5 text-[11px]"
-                        onClick={() => onQuote(activeCategory.key, name)}
+                        onClick={() => onQuote(kind, name)}
                       >
                         引用
                       </Button>
                       <Button
                         variant="ghost"
                         className="h-6 px-1.5 text-[11px]"
-                        onClick={() => onEdit(activeCategory.key, it)}
+                        onClick={() => onEdit(kind, it)}
+                        disabled={isPending}
                       >
                         编辑
                       </Button>

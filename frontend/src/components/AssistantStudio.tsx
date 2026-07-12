@@ -53,6 +53,7 @@ export default function AssistantStudio({ pid }: { pid: string }) {
         onToggle={() => setContextOpen((v) => !v)}
         onQuote={handleQuote}
         onEdit={(kind, item) => setEditing({ kind, item })}
+        pendingRecords={pendingRecords}
       />
 
       <AssistantChat

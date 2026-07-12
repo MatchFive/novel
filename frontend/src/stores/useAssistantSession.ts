@@ -105,7 +105,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
         const errorText = (data.errors || [])
           .map((e: any) => e.message || String(e))
           .join("；") || "应用失败";
-        set({ error: errorText });
+        set({ error: errorText, pendingRecords: [] });
         return;
       }
       set((s) => {

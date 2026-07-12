@@ -42,8 +42,7 @@ export default function AssistantChat({
     }
   }
   const lastAssistant = lastAssistantIndex >= 0 ? messages[lastAssistantIndex] : undefined;
-  const showActions =
-    pendingRecords.length > 0 && (!lastAssistant || !lastAssistant.metadata?.status);
+  const showActions = pendingRecords.length > 0;
 
   return (
     <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
