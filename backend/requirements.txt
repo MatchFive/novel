@@ -11,3 +11,5 @@ python-dotenv==1.0.1
 python-multipart==0.0.12
 pywebview==5.2
 websockets==13.0.1
+pytest==8.3.3
+pytest-asyncio==0.24.0

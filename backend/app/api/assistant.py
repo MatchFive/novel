@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import NotFoundError, ValidationError
 from app.core.llm_client import LLMClient
 from app.database import get_db
-from app.models import AssistantSession, Project, UserSetting
+from app.models import AssistantSession, AssistantMessage, Project, UserSetting
 from app.agents.harness.nodes.supervisor import run_supervisor
 from app.agents.harness.workers import (
     CharacterWorker, WorldWorker, OutlineWorker, PlotWorker, ForeshadowWorker,
@@ -58,6 +58,16 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     if not proj:
         raise NotFoundError("项目不存在")
 
+    sess = await _ensure_session(db, project_id)
+    user_msg = AssistantMessage(
+        session_id=sess.id,
+        role="user",
+        content=user_input,
+        metadata_={},
+    )
+    db.add(user_msg)
+    await db.flush()
+
     llm = LLMClient()
     recursive_limit = await _recursive_limit(db)
 
@@ -90,7 +100,6 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     records = aggregate(project_id, worker_results)
 
     # 5. 写入会话 staged_changes（仅引用，不落真实表）
-    sess = await _ensure_session(db, project_id)
     staged = list(sess.staged_changes or [])
     staged.extend([r.model_dump() for r in records])
     sess.staged_changes = staged
@@ -99,11 +108,26 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     # 6. responder 摘要
     summary = await respond(llm, records)
 
+    records_data = [r.model_dump() for r in records]
+    assistant_msg = AssistantMessage(
+        session_id=sess.id,
+        role="assistant",
+        content=summary,
+        metadata_={
+            "intent": plan.get("intent"),
+            "change_record_ids": [r.get("id") for r in records_data],
+        },
+    )
+    db.add(assistant_msg)
+    await db.commit()
+    await db.refresh(assistant_msg)
+
     return {
         "ok": True,
         "session_id": sess.id,
+        "message_id": assistant_msg.id,
         "intent": plan.get("intent"),
-        "change_records": [r.model_dump() for r in records],
+        "change_records": records_data,
         "summary": summary,
     }
 
