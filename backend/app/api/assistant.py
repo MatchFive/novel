@@ -1,6 +1,8 @@
 """Agent 助手接口：chat（分析→派发→变更）、confirm（应用）、reject、undo。"""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import NotFoundError, ValidationError
 from app.core.llm_client import LLMClient
 from app.database import get_db
-from app.models import AssistantSession, Project, UserSetting
+from app.models import AssistantSession, AssistantMessage, Project, UserSetting
 from app.agents.harness.nodes.supervisor import run_supervisor
 from app.agents.harness.workers import (
     CharacterWorker, WorldWorker, OutlineWorker, PlotWorker, ForeshadowWorker,
@@ -16,8 +18,9 @@ from app.agents.harness.workers import (
 from app.agents.harness.worker_base import run_worker
 from app.agents.harness.nodes.aggregator import aggregate
 from app.agents.harness.nodes.responder import respond
-from app.services.change_apply import confirm_session, reject_session
+from app.services.change_apply import _ENTITY_REPO, confirm_session, reject_session
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["assistant"])
 
 _WORKERS = {
@@ -58,6 +61,20 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     if not proj:
         raise NotFoundError("项目不存在")
 
+    sess = await _ensure_session(db, project_id)
+    try:
+        user_msg = AssistantMessage(
+            session_id=sess.id,
+            role="user",
+            content=user_input,
+            metadata_={},
+        )
+        db.add(user_msg)
+        await db.flush()
+    except Exception:
+        logger.exception("Failed to persist user assistant message")
+        await db.rollback()
+
     llm = LLMClient()
     recursive_limit = await _recursive_limit(db)
 
@@ -90,7 +107,6 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     records = aggregate(project_id, worker_results)
 
     # 5. 写入会话 staged_changes（仅引用，不落真实表）
-    sess = await _ensure_session(db, project_id)
     staged = list(sess.staged_changes or [])
     staged.extend([r.model_dump() for r in records])
     sess.staged_changes = staged
@@ -99,11 +115,32 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     # 6. responder 摘要
     summary = await respond(llm, records)
 
+    records_data = [r.model_dump() for r in records]
+    assistant_msg_id = None
+    try:
+        assistant_msg = AssistantMessage(
+            session_id=sess.id,
+            role="assistant",
+            content=summary,
+            metadata_={
+                "intent": plan.get("intent"),
+                "change_record_ids": [r.get("id") for r in records_data],
+            },
+        )
+        db.add(assistant_msg)
+        await db.commit()
+        await db.refresh(assistant_msg)
+        assistant_msg_id = assistant_msg.id
+    except Exception:
+        logger.exception("Failed to persist assistant message")
+        await db.rollback()
+
     return {
         "ok": True,
         "session_id": sess.id,
+        "message_id": assistant_msg_id,
         "intent": plan.get("intent"),
-        "change_records": [r.model_dump() for r in records],
+        "change_records": records_data,
         "summary": summary,
     }
 
@@ -114,12 +151,99 @@ async def get_session(project_id: str, db: AsyncSession = Depends(get_db)):
     return sess.to_dict()
 
 
+@router.get("/session/{project_id}/history")
+async def get_session_history(project_id: str, db: AsyncSession = Depends(get_db)):
+    sess = await _ensure_session(db, project_id)
+    res = await db.execute(
+        select(AssistantMessage)
+        .where(AssistantMessage.session_id == sess.id)
+        .order_by(AssistantMessage.created_at.asc())
+    )
+    messages = [
+        {
+            "id": m.id,
+            "role": m.role,
+            "content": m.content,
+            "metadata": m.metadata_ or {},
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in res.scalars().all()
+    ]
+    return {"ok": True, "session_id": sess.id, "messages": messages, "staged_changes": sess.staged_changes or []}
+
+
+@router.post("/stage")
+async def stage_change(body: dict, db: AsyncSession = Depends(get_db)):
+    session_id = body.get("session_id")
+    record = body.get("change_record")
+    if not session_id or not record:
+        raise ValidationError("session_id 与 change_record 必填")
+    if not isinstance(record, dict):
+        raise ValidationError("change_record 必须是对象")
+    required = ("id", "action", "entity_type")
+    for key in required:
+        value = record.get(key)
+        if not value or not isinstance(value, str):
+            raise ValidationError(f"change_record.{key} 不能为空字符串")
+    after = record.get("after")
+    if not after or not isinstance(after, dict):
+        raise ValidationError("change_record.after 必须是非空对象")
+    if not isinstance(record.get("requires_confirmation"), bool):
+        raise ValidationError("change_record.requires_confirmation 必须是布尔值")
+    sess = await db.get(AssistantSession, session_id)
+    if not sess:
+        raise NotFoundError("会话不存在")
+    record["project_id"] = sess.project_id
+    entity_type = record["entity_type"]
+    if entity_type not in _ENTITY_REPO:
+        raise ValidationError(f"不支持的实体类型：{entity_type}")
+    staged = list(sess.staged_changes or [])
+    staged.append(record)
+    sess.staged_changes = staged
+    await db.commit()
+    return {"ok": True, "staged_changes": staged}
+
+
+async def _mark_latest_assistant_message(db, session_id: str, status: str, count: int = 0, error_count: int = 0):
+    res = await db.execute(
+        select(AssistantMessage)
+        .where(AssistantMessage.session_id == session_id, AssistantMessage.role == "assistant")
+        .order_by(AssistantMessage.created_at.desc())
+        .limit(1)
+    )
+    msg = res.scalars().first()
+    if msg:
+        meta = dict(msg.metadata_ or {})
+        meta["status"] = status
+        if status == "partial":
+            meta["applied_count"] = count
+            meta["error_count"] = error_count
+        else:
+            meta[f"{status}_count"] = count
+        msg.metadata_ = meta
+        await db.commit()
+
+
 @router.post("/confirm")
 async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
     session_id = body.get("session_id")
     if not session_id:
         raise ValidationError("session_id 必填")
-    return await confirm_session(db, session_id)
+    result = await confirm_session(db, session_id)
+    try:
+        if result.get("ok"):
+            await _mark_latest_assistant_message(
+                db, session_id, "applied", len(result.get("applied", []))
+            )
+        else:
+            await _mark_latest_assistant_message(
+                db, session_id, "partial",
+                len(result.get("applied", [])),
+                len(result.get("errors", []))
+            )
+    except Exception:
+        logger.exception("Failed to mark latest assistant message status")
+    return result
 
 
 @router.post("/reject")
@@ -127,4 +251,11 @@ async def reject(body: dict, db: AsyncSession = Depends(get_db)):
     session_id = body.get("session_id")
     if not session_id:
         raise ValidationError("session_id 必填")
-    return await reject_session(db, session_id)
+    result = await reject_session(db, session_id)
+    try:
+        await _mark_latest_assistant_message(
+            db, session_id, "rejected", result.get("rejected_count", 0)
+        )
+    except Exception:
+        logger.exception("Failed to mark latest assistant message status")
+    return result

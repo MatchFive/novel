@@ -1,3 +1,4 @@
+import type { ChangeRecord } from "@/types";
 import api from "./client";
 
 export const shortApi = {
@@ -21,6 +22,9 @@ export const hotspotApi = {
 export const assistantApi = {
   chat: (pid: string, message: string) => api.post("/assistant/chat", { project_id: pid, message }),
   session: (pid: string) => api.get(`/assistant/session/${pid}`),
+  history: (pid: string) => api.get(`/assistant/session/${pid}/history`),
+  stage: (sessionId: string, record: ChangeRecord) =>
+    api.post("/assistant/stage", { session_id: sessionId, change_record: record }),
   confirm: (sessionId: string) => api.post("/assistant/confirm", { session_id: sessionId }),
   reject: (sessionId: string) => api.post("/assistant/reject", { session_id: sessionId }),
 };

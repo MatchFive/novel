@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { longApi } from "@/api/long";
-import { assistantApi } from "@/api/short";
 import { graphApi } from "@/api/graph";
-import type { ChangeRecord } from "@/types";
+import AssistantStudio from "@/components/AssistantStudio";
 import { Button, Input, Textarea, Card, SectionTitle } from "@/components/ui";
 
 export default function LongWorkspace() {
@@ -47,7 +46,7 @@ export default function LongWorkspace() {
         ]} />}
         {tab === "chapter" && <ChapterPanel pid={id!} />}
         {tab === "graph" && <GraphPanel pid={id!} />}
-        {tab === "assistant" && <AssistantPanel pid={id!} />}
+        {tab === "assistant" && <AssistantStudio pid={id!} />}
       </div>
     </div>
   );
@@ -190,83 +189,6 @@ function ChapterPanel({ pid }: { pid: string }) {
         <Textarea placeholder="正文" rows={4} value={content} onChange={(e) => setContent(e.target.value)} />
         <div><Button variant="primary" onClick={add}>+ 新增章节</Button></div>
       </Card>
-    </div>
-  );
-}
-
-function AssistantPanel({ pid }: { pid: string }) {
-  const [msg, setMsg] = useState("");
-  const [records, setRecords] = useState<ChangeRecord[]>([]);
-  const [summary, setSummary] = useState("");
-  const [sessionId, setSessionId] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [log, setLog] = useState("");
-
-  const send = async () => {
-    if (!msg.trim()) return;
-    setBusy(true); setLog("分析中…");
-    try {
-      const { data } = await assistantApi.chat(pid, msg);
-      setRecords(data.change_records);
-      setSummary(data.summary);
-      setSessionId(data.session_id);
-      setLog("完成，请确认变更。");
-    } catch (e: any) {
-      setLog("错误：" + e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const confirm = async () => {
-    if (!sessionId) return;
-    setBusy(true);
-    try {
-      const { data } = await assistantApi.confirm(sessionId);
-      setLog(data.ok ? `已应用 ${data.applied.length} 条变更` : "部分失败：" + JSON.stringify(data.errors));
-      setRecords([]);
-    } finally { setBusy(false); }
-  };
-
-  const reject = async () => {
-    if (!sessionId) return;
-    await assistantApi.reject(sessionId);
-    setRecords([]); setLog("已拒绝。");
-  };
-
-  return (
-    <div>
-      <SectionTitle>创作助手</SectionTitle>
-      <p className="mt-2 text-xs text-muted">Agent 仅读取真实数据 → 生成变更建议 → 你确认后才落库。</p>
-      <div className="mt-4 flex gap-2">
-        <Input placeholder="描述你的创作意图，例如：为主角增加一个宿敌角色" value={msg} onChange={(e) => setMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} />
-        <Button variant="primary" onClick={send} disabled={busy}>发送</Button>
-      </div>
-
-      {summary && (
-        <Card className="mt-4 bg-surface-2 p-4 text-sm">
-          <div className="mb-2 text-xs font-medium text-muted">摘要</div>
-          <div className="whitespace-pre-wrap text-ink">{summary}</div>
-        </Card>
-      )}
-
-      {records.length > 0 && (
-        <div className="mt-4 space-y-3">
-          <div className="text-sm font-medium text-ink">待确认变更（{records.length}）</div>
-          {records.map((r) => (
-            <Card key={r.id} className="p-3 text-xs">
-              <div className="font-medium text-ink">{r.action} / {r.entity_type} {r.entity_id || "(新增)"}</div>
-              <pre className="mt-1 overflow-auto whitespace-pre-wrap text-muted">{JSON.stringify(r.after, null, 2)}</pre>
-            </Card>
-          ))}
-          <div className="flex gap-2">
-            <Button variant="primary" onClick={confirm}>确认并应用</Button>
-            <Button variant="ghost" onClick={reject}>拒绝</Button>
-          </div>
-        </div>
-      )}
-
-      {log && <div className="mt-4 text-xs text-muted">{log}</div>}
     </div>
   );
 }
