@@ -36,6 +36,7 @@ async def test_chat_persists_messages():
         assert r.status_code == 200
         msgs = r.json()["messages"]
         assert any(m["role"] == "user" for m in msgs)
+        assert any(m["role"] == "assistant" for m in msgs)
 
 
 @pytest.mark.anyio
@@ -60,5 +61,10 @@ async def test_stage_change():
         r = await ac.post("/api/assistant/stage", json={"session_id": session_id, "change_record": record})
         assert r.status_code == 200
         assert r.json()["ok"] is True
+        assert any(rec["id"] == "test-record-1" for rec in r.json()["staged_changes"])
+
+        # Re-read the session history and verify the staged record persisted.
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        assert r.status_code == 200
         assert any(rec["id"] == "test-record-1" for rec in r.json()["staged_changes"])
 
