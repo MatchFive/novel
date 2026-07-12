@@ -1,8 +1,6 @@
 """助手多轮历史上下文组装与摘要生成。"""
 from __future__ import annotations
 
-from typing import Any
-
 from app.models import AssistantMessage, AssistantSession, UserSetting
 
 
