@@ -96,6 +96,29 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="mt-6">
+        <div className="border-b border-line px-4 py-3 font-serif text-sm font-medium text-ink">助手对话</div>
+        <div className="space-y-4 p-4">
+          {[
+            { key: "assistant_summary_threshold", label: "压缩阈值（轮）", min: 1, max: 100 },
+            { key: "assistant_max_summaries", label: "最大保留摘要数", min: 0, max: 20 },
+            { key: "assistant_summary_max_length", label: "单条摘要最大长度（字符）", min: 100, max: 4000 },
+          ].map((item) => (
+            <div key={item.key} className="flex items-center justify-between">
+              <span className="text-sm text-ink">{item.label}</span>
+              <Input
+                type="number"
+                min={item.min}
+                max={item.max}
+                value={(settings as any)[item.key]}
+                onChange={(e) => saveSettings({ [item.key]: Number(e.target.value) } as any)}
+                className="w-24"
+              />
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="mt-6">
         <div className="border-b border-line px-4 py-3 font-serif text-sm font-medium text-ink">模型配置</div>
         <div className="space-y-3 p-4">
           {models.length === 0 && <div className="text-sm text-muted">暂无模型配置，点击下方预设或手动添加。</div>}

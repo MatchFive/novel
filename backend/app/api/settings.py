@@ -49,6 +49,12 @@ async def update_user_settings(payload: UserSettingUpdate, db: AsyncSession = De
         s.hotspot_sources = payload.hotspot_sources
     if payload.theme is not None:
         s.theme = payload.theme
+    if payload.assistant_summary_threshold is not None:
+        s.assistant_summary_threshold = max(1, payload.assistant_summary_threshold)
+    if payload.assistant_max_summaries is not None:
+        s.assistant_max_summaries = max(0, payload.assistant_max_summaries)
+    if payload.assistant_summary_max_length is not None:
+        s.assistant_summary_max_length = max(100, payload.assistant_summary_max_length)
     await db.commit()
     await db.refresh(s)
     return s.to_dict()

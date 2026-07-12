@@ -19,6 +19,9 @@ export interface UserSettings {
   recursive_limit: number;
   hotspot_sources: { url: string; name?: string; adapter?: any }[];
   theme: string;
+  assistant_summary_threshold: number;
+  assistant_max_summaries: number;
+  assistant_summary_max_length: number;
 }
 
 export interface ChangeRecord {
