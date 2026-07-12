@@ -58,8 +58,8 @@ export default function ContextEntityEditor({ kind, item, onSave, onCancel }: Co
   });
 
   const handleSave = () => {
-    const before: Record<string, any> = { ...item };
-    const afterClean: Record<string, any> = { ...item };
+    const before: Record<string, any> = {};
+    const afterClean: Record<string, any> = {};
     fields.forEach((f) => {
       before[f.key] = item[f.key] || "";
       afterClean[f.key] = after[f.key];
