@@ -24,6 +24,17 @@ export interface UserSettings {
   assistant_summary_max_length: number;
 }
 
+export interface AssistantSession {
+  id: string;
+  project_id: string;
+  title: string;
+  is_active: boolean;
+  staged_changes: any[];
+  summaries: any[];
+  message_count: number;
+  updated_at: string | null;
+}
+
 export interface ChangeRecord {
   id: string;
   project_id: string;

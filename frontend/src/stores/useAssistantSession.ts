@@ -1,15 +1,19 @@
 import { create } from "zustand";
 import { assistantApi } from "@/api/short";
-import type { AssistantMessage, ChangeRecord } from "@/types";
+import type { AssistantMessage, AssistantSession, ChangeRecord } from "@/types";
 
 interface AssistantSessionState {
   sessionId: string | null;
+  sessions: AssistantSession[];
   messages: AssistantMessage[];
   busy: boolean;
   pendingRecords: ChangeRecord[];
   error: string | null;
   loadHistory: (pid: string) => Promise<void>;
+  loadSessions: (pid: string) => Promise<void>;
   sendMessage: (pid: string, text: string) => Promise<void>;
+  createSession: (pid: string) => Promise<void>;
+  switchSession: (sessionId: string, pid: string) => Promise<void>;
   stageChange: (record: ChangeRecord) => Promise<void>;
   confirm: () => Promise<void>;
   reject: () => Promise<void>;
@@ -17,6 +21,7 @@ interface AssistantSessionState {
 
 export const useAssistantSession = create<AssistantSessionState>((set, get) => ({
   sessionId: null,
+  sessions: [],
   messages: [],
   busy: false,
   pendingRecords: [],
@@ -33,6 +38,42 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "加载历史失败" });
+    }
+  },
+
+  loadSessions: async (pid: string) => {
+    try {
+      const { data } = await assistantApi.sessions(pid);
+      set({ sessions: data.sessions || [] });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "加载会话列表失败" });
+    }
+  },
+
+  createSession: async (pid: string) => {
+    set({ busy: true, error: null });
+    try {
+      const { data } = await assistantApi.createSession(pid);
+      await get().loadSessions(pid);
+      await get().loadHistory(pid);
+      set({ sessionId: data.session.id });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "新建对话失败" });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  switchSession: async (sessionId: string, pid: string) => {
+    set({ busy: true, error: null });
+    try {
+      await assistantApi.switchSession(sessionId);
+      await get().loadSessions(pid);
+      await get().loadHistory(pid);
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "切换对话失败" });
+    } finally {
+      set({ busy: false });
     }
   },
 
