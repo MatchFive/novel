@@ -175,12 +175,32 @@ async def stage_change(body: dict, db: AsyncSession = Depends(get_db)):
     return {"ok": True, "staged_changes": staged}
 
 
+async def _mark_latest_assistant_message(db, session_id: str, status: str, count: int = 0):
+    res = await db.execute(
+        select(AssistantMessage)
+        .where(AssistantMessage.session_id == session_id, AssistantMessage.role == "assistant")
+        .order_by(AssistantMessage.created_at.desc())
+        .limit(1)
+    )
+    msg = res.scalars().first()
+    if msg:
+        meta = dict(msg.metadata_ or {})
+        meta["status"] = status
+        meta[f"{status}_count"] = count
+        msg.metadata_ = meta
+        await db.commit()
+
+
 @router.post("/confirm")
 async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
     session_id = body.get("session_id")
     if not session_id:
         raise ValidationError("session_id 必填")
-    return await confirm_session(db, session_id)
+    result = await confirm_session(db, session_id)
+    await _mark_latest_assistant_message(
+        db, session_id, "applied", len(result.get("applied", []))
+    )
+    return result
 
 
 @router.post("/reject")
@@ -188,4 +208,8 @@ async def reject(body: dict, db: AsyncSession = Depends(get_db)):
     session_id = body.get("session_id")
     if not session_id:
         raise ValidationError("session_id 必填")
-    return await reject_session(db, session_id)
+    result = await reject_session(db, session_id)
+    await _mark_latest_assistant_message(
+        db, session_id, "rejected", result.get("rejected_count", 0)
+    )
+    return result

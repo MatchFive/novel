@@ -1,7 +1,8 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
-from app.database import create_all, engine
+from app.database import create_all, engine, AsyncSessionLocal
+from app.models import AssistantMessage
 
 
 @pytest.fixture(scope="module")
@@ -67,4 +68,83 @@ async def test_stage_change():
         r = await ac.get(f"/api/assistant/session/{pid}/history")
         assert r.status_code == 200
         assert any(rec["id"] == "test-record-1" for rec in r.json()["staged_changes"])
+
+
+@pytest.mark.anyio
+async def test_confirm_updates_message_metadata():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "confirm", "description": ""})
+        pid = r.json()["id"]
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        session_id = r.json()["session_id"]
+
+        record = {
+            "id": "confirm-record-1",
+            "project_id": pid,
+            "action": "add",
+            "entity_type": "character",
+            "entity_id": None,
+            "before": None,
+            "after": {"name": "Bob"},
+            "requires_confirmation": True,
+        }
+        r = await ac.post("/api/assistant/stage", json={"session_id": session_id, "change_record": record})
+        assert r.status_code == 200
+
+        async with AsyncSessionLocal() as db:
+            msg = AssistantMessage(session_id=session_id, role="assistant", content="summary", metadata_={})
+            db.add(msg)
+            await db.commit()
+
+        r = await ac.post("/api/assistant/confirm", json={"session_id": session_id})
+        assert r.status_code == 200
+
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        assert r.status_code == 200
+        assistant_messages = [m for m in r.json()["messages"] if m["role"] == "assistant"]
+        assert assistant_messages
+        latest = assistant_messages[-1]
+        assert latest["metadata"].get("status") == "applied"
+        assert latest["metadata"].get("applied_count") == 1
+
+
+@pytest.mark.anyio
+async def test_reject_updates_message_metadata():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "reject", "description": ""})
+        pid = r.json()["id"]
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        session_id = r.json()["session_id"]
+
+        record = {
+            "id": "reject-record-1",
+            "project_id": pid,
+            "action": "update",
+            "entity_type": "character",
+            "entity_id": "char-1",
+            "before": {"name": "Alice"},
+            "after": {"name": "Alice2"},
+            "requires_confirmation": True,
+        }
+        r = await ac.post("/api/assistant/stage", json={"session_id": session_id, "change_record": record})
+        assert r.status_code == 200
+
+        async with AsyncSessionLocal() as db:
+            msg = AssistantMessage(session_id=session_id, role="assistant", content="summary", metadata_={})
+            db.add(msg)
+            await db.commit()
+
+        r = await ac.post("/api/assistant/reject", json={"session_id": session_id})
+        assert r.status_code == 200
+        assert r.json().get("rejected_count") == 1
+
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        assert r.status_code == 200
+        assistant_messages = [m for m in r.json()["messages"] if m["role"] == "assistant"]
+        assert assistant_messages
+        latest = assistant_messages[-1]
+        assert latest["metadata"].get("status") == "rejected"
+        assert latest["metadata"].get("rejected_count") == 1
 

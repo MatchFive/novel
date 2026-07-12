@@ -110,6 +110,7 @@ async def reject_session(db: AsyncSession, session_id: str) -> dict:
     sess = res.scalars().first()
     if not sess:
         raise NotFoundError("会话不存在")
+    rejected_count = len(sess.staged_changes or [])
     sess.staged_changes = []
     await db.commit()
-    return {"ok": True}
+    return {"ok": True, "rejected_count": rejected_count}
