@@ -14,6 +14,12 @@ async def cleanup_tables():
             "assistant_messages",
             "assistant_sessions",
             "long_change_records",
+            "long_characters",
+            "long_outlines",
+            "long_foreshadows",
+            "long_world_settings",
+            "long_plot_nodes",
+            "long_chapters",
             "projects",
         ):
             await conn.exec_driver_sql(f"DELETE FROM {table};")
@@ -189,11 +195,11 @@ async def test_confirm_partial_status():
         invalid_record = {
             "id": "partial-record-2",
             "project_id": pid,
-            "action": "add",
-            "entity_type": "unknown_entity",
-            "entity_id": None,
-            "before": None,
-            "after": {"name": "Diana"},
+            "action": "update",
+            "entity_type": "character",
+            "entity_id": "non-existent-id",
+            "before": {"name": "Diana"},
+            "after": {"name": "Diana2"},
             "requires_confirmation": True,
         }
         for record in (valid_record, invalid_record):

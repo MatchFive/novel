@@ -65,7 +65,7 @@ export default function ContextEntityEditor({ kind, item, onSave, onCancel }: Co
       afterClean[f.key] = after[f.key];
     });
     const record: ChangeRecord = {
-      id: `manual-${Date.now()}`,
+      id: `manual-${crypto.randomUUID()}`,
       project_id: item.project_id,
       action: "update",
       entity_type: kind,

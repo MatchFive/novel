@@ -18,7 +18,7 @@ from app.agents.harness.workers import (
 from app.agents.harness.worker_base import run_worker
 from app.agents.harness.nodes.aggregator import aggregate
 from app.agents.harness.nodes.responder import respond
-from app.services.change_apply import confirm_session, reject_session
+from app.services.change_apply import _ENTITY_REPO, confirm_session, reject_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["assistant"])
@@ -193,6 +193,10 @@ async def stage_change(body: dict, db: AsyncSession = Depends(get_db)):
     sess = await db.get(AssistantSession, session_id)
     if not sess:
         raise NotFoundError("会话不存在")
+    record["project_id"] = sess.project_id
+    entity_type = record["entity_type"]
+    if entity_type not in _ENTITY_REPO:
+        raise ValidationError(f"不支持的实体类型：{entity_type}")
     staged = list(sess.staged_changes or [])
     staged.append(record)
     sess.staged_changes = staged
@@ -226,16 +230,19 @@ async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
     if not session_id:
         raise ValidationError("session_id 必填")
     result = await confirm_session(db, session_id)
-    if result.get("ok"):
-        await _mark_latest_assistant_message(
-            db, session_id, "applied", len(result.get("applied", []))
-        )
-    else:
-        await _mark_latest_assistant_message(
-            db, session_id, "partial",
-            len(result.get("applied", [])),
-            len(result.get("errors", []))
-        )
+    try:
+        if result.get("ok"):
+            await _mark_latest_assistant_message(
+                db, session_id, "applied", len(result.get("applied", []))
+            )
+        else:
+            await _mark_latest_assistant_message(
+                db, session_id, "partial",
+                len(result.get("applied", [])),
+                len(result.get("errors", []))
+            )
+    except Exception:
+        logger.exception("Failed to mark latest assistant message status")
     return result
 
 
@@ -245,7 +252,10 @@ async def reject(body: dict, db: AsyncSession = Depends(get_db)):
     if not session_id:
         raise ValidationError("session_id 必填")
     result = await reject_session(db, session_id)
-    await _mark_latest_assistant_message(
-        db, session_id, "rejected", result.get("rejected_count", 0)
-    )
+    try:
+        await _mark_latest_assistant_message(
+            db, session_id, "rejected", result.get("rejected_count", 0)
+        )
+    except Exception:
+        logger.exception("Failed to mark latest assistant message status")
     return result

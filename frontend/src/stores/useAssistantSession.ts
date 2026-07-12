@@ -64,18 +64,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
       }));
     } catch (err) {
       const errorText = err instanceof Error ? err.message : "发送失败";
-      set((s) => ({
-        error: errorText,
-        messages: [
-          ...s.messages,
-          {
-            id: `error-${Date.now()}`,
-            role: "assistant",
-            content: `发送失败：${errorText}`,
-            created_at: new Date().toISOString(),
-          },
-        ],
-      }));
+      set({ error: errorText });
       throw err;
     } finally {
       set({ busy: false });
