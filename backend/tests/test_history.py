@@ -143,6 +143,7 @@ def test_build_history_context_respects_max_summaries():
     settings = UserSetting(assistant_max_summaries=2)
     context = build_history_context(session, [], settings)
     assert len(context) == 2
-    assert "one" in context[0]["content"]
-    assert "three" not in context[0]["content"]
-    assert "three" not in context[1]["content"]
+    assert "two" in context[0]["content"]
+    assert "three" in context[1]["content"]
+    assert "one" not in context[0]["content"]
+    assert "one" not in context[1]["content"]

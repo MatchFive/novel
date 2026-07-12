@@ -12,7 +12,7 @@ def build_history_context(
     """返回历史摘要 + 最近具体消息（不含 system prompt 与当前输入）。"""
     out: list[dict[str, str]] = []
 
-    summaries = (session.summaries or [])[: settings.assistant_max_summaries]
+    summaries = (session.summaries or [])[-settings.assistant_max_summaries :]
     for i, s in enumerate(summaries):
         out.append({
             "role": "user",
