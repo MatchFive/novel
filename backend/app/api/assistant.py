@@ -1,6 +1,8 @@
 """Agent 助手接口：chat（分析→派发→变更）、confirm（应用）、reject、undo。"""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +20,7 @@ from app.agents.harness.nodes.aggregator import aggregate
 from app.agents.harness.nodes.responder import respond
 from app.services.change_apply import confirm_session, reject_session
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["assistant"])
 
 _WORKERS = {
@@ -59,14 +62,18 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         raise NotFoundError("项目不存在")
 
     sess = await _ensure_session(db, project_id)
-    user_msg = AssistantMessage(
-        session_id=sess.id,
-        role="user",
-        content=user_input,
-        metadata_={},
-    )
-    db.add(user_msg)
-    await db.flush()
+    try:
+        user_msg = AssistantMessage(
+            session_id=sess.id,
+            role="user",
+            content=user_input,
+            metadata_={},
+        )
+        db.add(user_msg)
+        await db.flush()
+    except Exception:
+        logger.exception("Failed to persist user assistant message")
+        await db.rollback()
 
     llm = LLMClient()
     recursive_limit = await _recursive_limit(db)
@@ -109,23 +116,29 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     summary = await respond(llm, records)
 
     records_data = [r.model_dump() for r in records]
-    assistant_msg = AssistantMessage(
-        session_id=sess.id,
-        role="assistant",
-        content=summary,
-        metadata_={
-            "intent": plan.get("intent"),
-            "change_record_ids": [r.get("id") for r in records_data],
-        },
-    )
-    db.add(assistant_msg)
-    await db.commit()
-    await db.refresh(assistant_msg)
+    assistant_msg_id = None
+    try:
+        assistant_msg = AssistantMessage(
+            session_id=sess.id,
+            role="assistant",
+            content=summary,
+            metadata_={
+                "intent": plan.get("intent"),
+                "change_record_ids": [r.get("id") for r in records_data],
+            },
+        )
+        db.add(assistant_msg)
+        await db.commit()
+        await db.refresh(assistant_msg)
+        assistant_msg_id = assistant_msg.id
+    except Exception:
+        logger.exception("Failed to persist assistant message")
+        await db.rollback()
 
     return {
         "ok": True,
         "session_id": sess.id,
-        "message_id": assistant_msg.id,
+        "message_id": assistant_msg_id,
         "intent": plan.get("intent"),
         "change_records": records_data,
         "summary": summary,

@@ -7,6 +7,7 @@ interface AssistantSessionState {
   messages: AssistantMessage[];
   busy: boolean;
   pendingRecords: ChangeRecord[];
+  error: string | null;
   loadHistory: (pid: string) => Promise<void>;
   sendMessage: (pid: string, text: string) => Promise<void>;
   stageChange: (record: ChangeRecord) => Promise<void>;
@@ -19,26 +20,32 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
   messages: [],
   busy: false,
   pendingRecords: [],
+  error: null,
 
   loadHistory: async (pid: string) => {
-    const { data } = await assistantApi.history(pid);
-    set({
-      sessionId: data.session_id,
-      messages: data.messages || [],
-      pendingRecords: data.staged_changes || [],
-    });
+    set({ error: null, messages: [], pendingRecords: [] });
+    try {
+      const { data } = await assistantApi.history(pid);
+      set({
+        sessionId: data.session_id,
+        messages: data.messages || [],
+        pendingRecords: data.staged_changes || [],
+      });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "加载历史失败" });
+    }
   },
 
   sendMessage: async (pid: string, text: string) => {
-    set({ busy: true });
+    set({ busy: true, error: null });
+    const userMsg: AssistantMessage = {
+      id: `local-${Date.now()}`,
+      role: "user",
+      content: text,
+      created_at: new Date().toISOString(),
+    };
+    set((s) => ({ messages: [...s.messages, userMsg] }));
     try {
-      const userMsg: AssistantMessage = {
-        id: `local-${Date.now()}`,
-        role: "user",
-        content: text,
-        created_at: new Date().toISOString(),
-      };
-      set((s) => ({ messages: [...s.messages, userMsg] }));
       const { data } = await assistantApi.chat(pid, text);
       const assistantMsg: AssistantMessage = {
         id: data.message_id,
@@ -55,6 +62,20 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
         messages: [...s.messages, assistantMsg],
         pendingRecords: [...s.pendingRecords, ...(data.change_records || [])],
       }));
+    } catch (err) {
+      const errorText = err instanceof Error ? err.message : "发送失败";
+      set((s) => ({
+        error: errorText,
+        messages: [
+          ...s.messages.filter((m) => m.id !== userMsg.id),
+          {
+            id: `error-${Date.now()}`,
+            role: "assistant",
+            content: `发送失败：${errorText}`,
+            created_at: new Date().toISOString(),
+          },
+        ],
+      }));
     } finally {
       set({ busy: false });
     }
@@ -63,16 +84,21 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
   stageChange: async (record: ChangeRecord) => {
     const sessionId = get().sessionId;
     if (!sessionId) return;
-    await assistantApi.stage(sessionId, record);
-    set((s) => ({
-      pendingRecords: [...s.pendingRecords, record],
-    }));
+    set({ error: null });
+    try {
+      await assistantApi.stage(sessionId, record);
+      set((s) => ({
+        pendingRecords: [...s.pendingRecords, record],
+      }));
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "暂存变更失败" });
+    }
   },
 
   confirm: async () => {
     const sessionId = get().sessionId;
     if (!sessionId) return;
-    set({ busy: true });
+    set({ busy: true, error: null });
     try {
       const { data } = await assistantApi.confirm(sessionId);
       set((s) => {
@@ -96,6 +122,8 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
         }
         return { messages, pendingRecords: [] };
       });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "应用失败" });
     } finally {
       set({ busy: false });
     }
@@ -104,7 +132,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
   reject: async () => {
     const sessionId = get().sessionId;
     if (!sessionId) return;
-    set({ busy: true });
+    set({ busy: true, error: null });
     try {
       const { data } = await assistantApi.reject(sessionId);
       set((s) => {
@@ -128,6 +156,8 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
         }
         return { messages, pendingRecords: [] };
       });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "拒绝失败" });
     } finally {
       set({ busy: false });
     }

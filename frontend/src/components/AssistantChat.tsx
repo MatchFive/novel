@@ -7,6 +7,7 @@ interface AssistantChatProps {
   messages: AssistantMessage[];
   pendingRecords: ChangeRecord[];
   busy: boolean;
+  error: string | null;
   onConfirm: () => void;
   onReject: () => void;
 }
@@ -23,6 +24,7 @@ export default function AssistantChat({
   messages,
   pendingRecords,
   busy,
+  error,
   onConfirm,
   onReject,
 }: AssistantChatProps) {
@@ -44,6 +46,12 @@ export default function AssistantChat({
 
   return (
     <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
+      {error && (
+        <div className="rounded-none border border-accent bg-surface p-3 text-xs text-accent">
+          出错了：{error}
+        </div>
+      )}
+
       {messages.length === 0 && !busy && (
         <div className="py-10 text-center text-sm text-muted">
           描述你的创作意图，例如“为主角增加一个宿敌角色”。

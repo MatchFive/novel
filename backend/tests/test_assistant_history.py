@@ -1,5 +1,6 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
+from unittest.mock import AsyncMock, patch
 from app.main import app
 from app.database import create_all, engine, AsyncSessionLocal
 from app.models import AssistantMessage
@@ -19,7 +20,12 @@ async def setup_db():
 
 
 @pytest.mark.anyio
-async def test_chat_persists_messages():
+@patch("app.api.assistant.LLMClient")
+async def test_chat_persists_messages(mock_llm_client):
+    mock_llm = mock_llm_client.return_value
+    mock_llm.parse_llm_json = AsyncMock(return_value={"intent": "test", "tasks": []})
+    mock_llm.chat = AsyncMock(return_value="summary")
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         # ensure project exists

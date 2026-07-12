@@ -16,6 +16,7 @@ export default function AssistantStudio({ pid }: { pid: string }) {
     pendingRecords,
     busy,
     sessionId,
+    error,
     loadHistory,
     sendMessage,
     stageChange,
@@ -30,8 +31,8 @@ export default function AssistantStudio({ pid }: { pid: string }) {
   const handleSend = async () => {
     if (!input.trim()) return;
     const text = input;
-    setInput("");
     await sendMessage(pid, text);
+    setInput("");
   };
 
   const handleQuote = (kind: string, name: string) => {
@@ -58,6 +59,7 @@ export default function AssistantStudio({ pid }: { pid: string }) {
         messages={messages}
         pendingRecords={pendingRecords}
         busy={busy}
+        error={error}
         onConfirm={confirm}
         onReject={reject}
       />
