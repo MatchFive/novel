@@ -3,6 +3,7 @@
 """
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Callable
 
@@ -10,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools import call_tool, tool_schemas
 from app.config import settings as app_settings
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerBase:
@@ -37,22 +40,33 @@ class WorkerBase:
             resp = await self.llm.chat(
                 messages, response_format=None
             )
+            logger.warning("[%s] LLM resp (call %d): %s", self.worker_name, calls, resp[:500])
             # 尝试解析工具调用（兼容 OpenAI function call / JSON 指令两种形态）
             tool_call = self._parse_tool_call(resp)
             if not tool_call:
                 # 没有进一步工具调用 -> 视为最终产出
-                return self._parse_final(resp)
+                parsed = self._parse_final(resp)
+                logger.warning("[%s] parsed final: %s", self.worker_name, parsed)
+                return parsed
             name = tool_call.get("name")
             args = tool_call.get("arguments", {})
+            logger.warning("[%s] tool call: %s args: %s", self.worker_name, name, args)
             try:
                 result = await call_tool(self.db, name, args)
             except Exception as e:
                 result = {"error": str(e)}
+            logger.warning("[%s] tool result: %s", self.worker_name, str(result)[:500])
             messages.append({"role": "assistant", "content": resp})
-            messages.append({"role": "tool", "name": name, "content": str(result)[:4000]})
+            messages.append({
+                "role": "user",
+                "content": f"工具 {name} 返回结果：\n{str(result)[:4000]}",
+            })
         # 超出上限，让 LLM 直接总结
         final = await self.llm.chat(messages)
-        return self._parse_final(final)
+        logger.warning("[%s] final LLM resp: %s", self.worker_name, final[:500])
+        parsed = self._parse_final(final)
+        logger.warning("[%s] parsed final: %s", self.worker_name, parsed)
+        return parsed
 
     def _parse_tool_call(self, text: str) -> dict | None:
         import json
@@ -67,7 +81,47 @@ class WorkerBase:
         return None
 
     def _parse_final(self, text: str) -> dict:
-        # 子类可覆盖：将 LLM 文本解析为结构化结果
+        """将 LLM 最终文本解析为结构化结果；支持纯 JSON、Markdown 代码块、JSON 子串。"""
+        import json
+        cleaned = text.strip()
+
+        def try_parse(value: str) -> dict | None:
+            try:
+                parsed = json.loads(value.strip().strip("`"))
+                if isinstance(parsed, dict):
+                    return parsed
+                if isinstance(parsed, list):
+                    return {"changes": parsed}
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return None
+
+        # 1. 尝试解析整段文本
+        result = try_parse(cleaned)
+        if result is not None:
+            return result
+
+        # 2. 查找 ```json / ``` 代码块
+        if "```" in cleaned:
+            parts = cleaned.split("```")
+            for part in parts[1:]:
+                block = part.strip()
+                if block.lower().startswith("json"):
+                    block = block[4:]
+                result = try_parse(block)
+                if result is not None:
+                    return result
+
+        # 3. 尝试截取第一个 { ... } 或 [ ... ] 子串
+        for start_char, end_char in (("{", "}"), ("[", "]")):
+            start = cleaned.find(start_char)
+            if start != -1:
+                end = cleaned.rfind(end_char)
+                if end > start:
+                    result = try_parse(cleaned[start:end + 1])
+                    if result is not None:
+                        return result
+
         return {"raw": text}
 
 

@@ -90,6 +90,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
 
     # 2. Supervisor 拆分
     plan = await run_supervisor(llm, user_input, context)
+    logger.warning("Assistant supervisor plan: %s", plan)
 
     # 3. 派发 Worker（仅通过只读工具取数，产出结构化结果，不落库）
     worker_results = []
@@ -101,10 +102,12 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         goal = task.get("goal", user_input)
         result = await run_worker(wcls, db, llm, recursive_limit, goal, context)
         result["worker"] = wname
+        logger.warning("Worker %s result: %s", wname, result)
         worker_results.append(result)
 
     # 4. aggregator -> ChangeRecord[]
     records = aggregate(project_id, worker_results)
+    logger.warning("Aggregated change records: %s", [r.model_dump() for r in records])
 
     # 5. 写入会话 staged_changes（仅引用，不落真实表）
     staged = list(sess.staged_changes or [])

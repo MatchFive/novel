@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator, Optional
 
 import httpx
 
 from app.config import settings
 from app.core.errors import AppError
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -39,6 +42,22 @@ class LLMClient:
                 status_code=503,
             )
 
+    def _raise_llm_error(self, payload: dict, exc: httpx.HTTPStatusError) -> None:
+        """把上游 LLM HTTP 错误转换为结构化 AppError，并记录请求体便于排查。"""
+        try:
+            body = exc.response.text
+        except Exception:
+            body = "<无法读取响应体>"
+        logger.error(
+            "LLM request failed: %s %s - payload=%s response=%s",
+            exc.response.status_code, exc.request.url, json.dumps(payload, ensure_ascii=False), body,
+        )
+        raise AppError(
+            f"调用模型服务失败（{exc.response.status_code}）：{body[:200]}",
+            code="LLM_REQUEST_FAILED",
+            status_code=502,
+        ) from exc
+
     async def chat(
         self,
         messages: list[dict[str, str]],
@@ -57,12 +76,15 @@ class LLMClient:
         if response_format:
             payload["response_format"] = response_format
         async with httpx.AsyncClient(timeout=timeout or self.timeout) as client:
-            resp = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            )
-            resp.raise_for_status()
+            try:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                )
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                self._raise_llm_error(payload, exc)
             data = resp.json()
             return data["choices"][0]["message"]["content"]
 
@@ -81,24 +103,27 @@ class LLMClient:
             "stream": True,
         }
         async with httpx.AsyncClient(timeout=self.timeout + 60) as client:
-            async with client.stream(
-                "POST", f"{self.base_url}/chat/completions",
-                headers=self._headers(), json=payload,
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[len("data:"):].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        delta = chunk["choices"][0]["delta"].get("content")
-                        if delta:
-                            yield delta
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
+            try:
+                async with client.stream(
+                    "POST", f"{self.base_url}/chat/completions",
+                    headers=self._headers(), json=payload,
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[len("data:"):].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            delta = chunk["choices"][0]["delta"].get("content")
+                            if delta:
+                                yield delta
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+            except httpx.HTTPStatusError as exc:
+                self._raise_llm_error(payload, exc)
 
     async def parse_llm_json(self, messages: list[dict[str, str]], *, model: Optional[str] = None) -> Any:
         """调用 chat（json 模式）并解析为 Python 对象；失败返回原始文本。"""
