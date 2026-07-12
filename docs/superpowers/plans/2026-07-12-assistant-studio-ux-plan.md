@@ -37,7 +37,7 @@ class AssistantMessage(Base):
     session_id = Column(CHAR(36), ForeignKey("assistant_sessions.id"), nullable=False, index=True)
     role = Column(String(32), nullable=False)
     content = Column(Text, default="")
-    metadata = Column(JSON, default=dict)
+    metadata_ = Column("metadata", JSON, default=dict)
     created_at = Column(DateTime, default=_now, nullable=False)
 ```
 
@@ -151,7 +151,7 @@ Inside `chat`, before running supervisor:
         session_id=sess.id,
         role="user",
         content=user_input,
-        metadata={},
+        metadata_={},
     )
     db.add(user_msg)
     await db.flush()
@@ -165,7 +165,7 @@ After `summary = await respond(...)`, before returning:
         session_id=sess.id,
         role="assistant",
         content=summary,
-        metadata={
+        metadata_={
             "intent": plan.get("intent"),
             "change_record_ids": [r.get("id") for r in records_data],
         },
@@ -229,7 +229,7 @@ async def get_session_history(project_id: str, db: AsyncSession = Depends(get_db
             "id": m.id,
             "role": m.role,
             "content": m.content,
-            "metadata": m.metadata or {},
+            "metadata": m.metadata_ or {},
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in res.scalars().all()
@@ -350,10 +350,10 @@ async def _mark_latest_assistant_message(db, session_id: str, status: str, count
     )
     msg = res.scalars().first()
     if msg:
-        meta = dict(msg.metadata or {})
+        meta = dict(msg.metadata_ or {})
         meta["status"] = status
         meta[f"{status}_count"] = count
-        msg.metadata = meta
+        msg.metadata_ = meta
         await db.commit()
 ```
 
