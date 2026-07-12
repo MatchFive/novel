@@ -31,8 +31,12 @@ export default function AssistantStudio({ pid }: { pid: string }) {
   const handleSend = async () => {
     if (!input.trim()) return;
     const text = input;
-    await sendMessage(pid, text);
-    setInput("");
+    try {
+      await sendMessage(pid, text);
+      setInput("");
+    } catch {
+      // error is already surfaced by the store
+    }
   };
 
   const handleQuote = (kind: string, name: string) => {

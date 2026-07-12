@@ -76,6 +76,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
           },
         ],
       }));
+      throw err;
     } finally {
       set({ busy: false });
     }
