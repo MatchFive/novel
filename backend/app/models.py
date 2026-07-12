@@ -79,12 +79,18 @@ class UserSetting(Base):
     recursive_limit = Column(Integer, default=8)
     hotspot_sources = Column(JSON, default=list)
     theme = Column(String(32), default="light")
+    assistant_summary_threshold = Column(Integer, default=20)
+    assistant_max_summaries = Column(Integer, default=5)
+    assistant_summary_max_length = Column(Integer, default=1000)
 
     def to_dict(self) -> dict:
         return {
             "recursive_limit": self.recursive_limit,
             "hotspot_sources": self.hotspot_sources or [],
             "theme": self.theme,
+            "assistant_summary_threshold": self.assistant_summary_threshold,
+            "assistant_max_summaries": self.assistant_max_summaries,
+            "assistant_summary_max_length": self.assistant_summary_max_length,
         }
 
 
@@ -93,14 +99,22 @@ class AssistantSession(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=True, index=True)
+    title = Column(String(255), nullable=False, default="未命名对话")
+    is_active = Column(Boolean, default=False, nullable=False)
     staged_changes = Column(JSON, default=list)
+    summaries = Column(JSON, default=list)
+    message_count = Column(Integer, default=0, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "project_id": self.project_id,
+            "title": self.title,
+            "is_active": self.is_active,
             "staged_changes": self.staged_changes or [],
+            "summaries": self.summaries or [],
+            "message_count": self.message_count,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
