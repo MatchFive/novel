@@ -112,8 +112,8 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     settings_row = (await db.execute(select(UserSetting))).scalars().first()
     settings_obj = settings_row or UserSetting()
 
-    # 历史上下文（摘要 + 最近消息），不含 system 与当前输入
-    history_context = build_history_context(sess, historical_messages, settings_obj)
+    # 历史上下文（摘要 + 最近消息），不含 system 与当前用户输入
+    history_context = build_history_context(sess, historical_messages[:-1], settings_obj)
 
     # 1. 前置取数
     from app import repositories as repo
@@ -125,7 +125,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         "plot": await repo.list_plot(db, project_id),
     }
 
-    # 2. Supervisor 拆分（使用完整 messages）
+    # 2. Supervisor 拆分（使用不含当前用户输入的 messages，当前输入单独传入）
     supervisor_msgs = build_messages(
         "你是小说创作助手的调度器。根据用户指令与项目现有数据，判断需要派发哪些专精 Worker 来处理。"
         "可选 Worker：character（角色设计/调整）、world（世界观设定）、outline（大纲生成/调整）、"
@@ -133,7 +133,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         '{"intent": "一句话意图", "tasks": [{"worker": "character", "goal": "..."}, ...]}。'
         "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。",
         sess,
-        historical_messages,
+        historical_messages[:-1],
         user_input,
         settings_obj,
     )
@@ -167,7 +167,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     # 6. responder 摘要
-    summary = await respond(llm, records, history_context=history_context)
+    summary = await respond(llm, records, user_input=user_input, history_context=history_context)
 
     records_data = [r.model_dump() for r in records]
     assistant_msg_id = None
@@ -186,11 +186,21 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         await db.refresh(assistant_msg)
         assistant_msg_id = assistant_msg.id
 
+        # 重新加载完整历史（含刚刚保存的助手回复），用于后续压缩
+        hist_res = await db.execute(
+            select(AssistantMessage)
+            .where(AssistantMessage.session_id == sess.id)
+            .order_by(AssistantMessage.created_at.asc())
+        )
+        reload_messages = hist_res.scalars().all()
+
         # 7. 触发历史摘要压缩
         sess.message_count += 2
+        await db.commit()
+        await db.refresh(sess)
         if should_summarize(sess, settings_obj):
             threshold = settings_obj.assistant_summary_threshold or 20
-            recent = historical_messages[-(threshold * 2):]
+            recent = reload_messages[-(threshold * 2):]
             summary_text = await summarize_messages(recent, settings_obj, llm)
             append_summary(sess, recent, summary_text, settings_obj)
             await db.commit()
