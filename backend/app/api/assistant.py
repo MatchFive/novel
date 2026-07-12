@@ -138,6 +138,27 @@ async def get_session(project_id: str, db: AsyncSession = Depends(get_db)):
     return sess.to_dict()
 
 
+@router.get("/session/{project_id}/history")
+async def get_session_history(project_id: str, db: AsyncSession = Depends(get_db)):
+    sess = await _ensure_session(db, project_id)
+    res = await db.execute(
+        select(AssistantMessage)
+        .where(AssistantMessage.session_id == sess.id)
+        .order_by(AssistantMessage.created_at.asc())
+    )
+    messages = [
+        {
+            "id": m.id,
+            "role": m.role,
+            "content": m.content,
+            "metadata": m.metadata_ or {},
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in res.scalars().all()
+    ]
+    return {"ok": True, "session_id": sess.id, "messages": messages, "staged_changes": sess.staged_changes or []}
+
+
 @router.post("/confirm")
 async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
     session_id = body.get("session_id")
