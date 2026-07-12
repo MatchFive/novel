@@ -11,7 +11,8 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.core.errors import register_exception_handlers
-from app.database import create_all, dispose_engine
+from app.database import AsyncSessionLocal, create_all, dispose_engine
+from app.services.settings_seed import seed_default_models
 
 
 def _register_routers(app: FastAPI) -> None:
@@ -53,6 +54,8 @@ def _mount_spa(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await create_all()
+    async with AsyncSessionLocal() as db:
+        await seed_default_models(db)
     yield
     await dispose_engine()
 

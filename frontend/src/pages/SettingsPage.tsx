@@ -1,13 +1,17 @@
 import { useEffect, useState } from "react";
 import { settingsApi } from "@/api/settings";
 import type { ModelConfig, UserSettings } from "@/types";
-import { Button, Input, Textarea, Card, Tag } from "@/components/ui";
+import { Button, Input, Card, Tag } from "@/components/ui";
+
+const EMPTY_MODEL = { name: "", base_url: "", api_key: "", model: "", is_default: false };
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [models, setModels] = useState<ModelConfig[]>([]);
-  const [newModel, setNewModel] = useState({ name: "", base_url: "", api_key: "", model: "", is_default: false });
+  const [newModel, setNewModel] = useState({ ...EMPTY_MODEL });
   const [testMsg, setTestMsg] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ ...EMPTY_MODEL });
 
   const load = async () => {
     const s = await settingsApi.get();
@@ -34,6 +38,30 @@ export default function SettingsPage() {
   };
   const delHotspot = (i: number) => {
     saveSettings({ hotspot_sources: settings.hotspot_sources.filter((_, idx) => idx !== i) });
+  };
+
+  const startEdit = (m: ModelConfig) => {
+    setEditingId(m.id);
+    setEditForm({ name: m.name, base_url: m.base_url, model: m.model, api_key: "", is_default: m.is_default });
+  };
+
+  const saveEdit = async (id: string) => {
+    await settingsApi.updateModel(id, editForm);
+    setEditingId(null);
+    await load();
+  };
+
+  const addModel = async () => {
+    if (!newModel.name || !newModel.base_url || !newModel.model) return;
+    await settingsApi.createModel(newModel);
+    setNewModel({ ...EMPTY_MODEL });
+    setTestMsg("");
+    await load();
+  };
+
+  const testNewModel = async () => {
+    const r = await settingsApi.testModel(newModel);
+    setTestMsg(r.data.ok ? "连接成功：" + (r.data.reply || "").slice(0, 50) : "失败：" + r.data.error);
   };
 
   return (
@@ -69,38 +97,55 @@ export default function SettingsPage() {
 
       <Card className="mt-6">
         <div className="border-b border-line px-4 py-3 font-serif text-sm font-medium text-ink">模型配置</div>
-        <div className="space-y-2 p-4">
+        <div className="space-y-3 p-4">
+          {models.length === 0 && <div className="text-sm text-muted">暂无模型配置，点击下方预设或手动添加。</div>}
           {models.map((m) => (
-            <Card key={m.id} className="flex items-center justify-between px-4 py-3 text-sm">
-              <div>
-                <span className="font-medium text-ink">{m.name}</span>
-                <span className="ml-2 text-muted">{m.model}</span>
-                {m.is_default && <Tag className="ml-2">默认</Tag>}
-              </div>
-              <div className="flex gap-2">
-                <Button variant="ghost" onClick={async () => { await settingsApi.updateModel(m.id, { is_default: true }); load(); }}>设为默认</Button>
-                <Button variant="ghost" onClick={async () => { await settingsApi.deleteModel(m.id); load(); }}>删</Button>
-              </div>
+            <Card key={m.id} className="p-3 text-sm">
+              {editingId === m.id ? (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input placeholder="名称" value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
+                    <Input placeholder="model" value={editForm.model} onChange={(e) => setEditForm({ ...editForm, model: e.target.value })} />
+                    <Input placeholder="base_url" value={editForm.base_url} onChange={(e) => setEditForm({ ...editForm, base_url: e.target.value })} />
+                    <Input placeholder="api_key（留空则保持原值）" type="password" value={editForm.api_key} onChange={(e) => setEditForm({ ...editForm, api_key: e.target.value })} />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="primary" onClick={() => saveEdit(m.id)}>保存</Button>
+                    <Button variant="ghost" onClick={() => setEditingId(null)}>取消</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-medium text-ink">{m.name}</span>
+                    <span className="ml-2 text-muted">{m.model}</span>
+                    {m.is_default && <Tag className="ml-2">默认</Tag>}
+                    <div className="text-xs text-muted">{m.base_url}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="ghost" onClick={() => startEdit(m)}>编辑</Button>
+                    <Button variant="ghost" onClick={async () => { await settingsApi.updateModel(m.id, { is_default: true }); load(); }}>设为默认</Button>
+                    <Button variant="ghost" onClick={async () => { await settingsApi.deleteModel(m.id); load(); }}>删</Button>
+                  </div>
+                </div>
+              )}
             </Card>
           ))}
-          <div className="grid grid-cols-2 gap-2 pt-2">
-            <Input placeholder="名称" value={newModel.name} onChange={(e) => setNewModel({ ...newModel, name: e.target.value })} />
-            <Input placeholder="model" value={newModel.model} onChange={(e) => setNewModel({ ...newModel, model: e.target.value })} />
-            <Input placeholder="base_url" value={newModel.base_url} onChange={(e) => setNewModel({ ...newModel, base_url: e.target.value })} />
-            <Input placeholder="api_key" type="password" value={newModel.api_key} onChange={(e) => setNewModel({ ...newModel, api_key: e.target.value })} />
-          </div>
-          <div className="flex gap-2">
-            <Button variant="primary" onClick={async () => {
-              if (!newModel.name || !newModel.base_url || !newModel.model) return;
-              await settingsApi.createModel(newModel);
-              setNewModel({ name: "", base_url: "", api_key: "", model: "", is_default: false });
-              load();
-            }}>+ 新增模型</Button>
-            <Button variant="ghost" onClick={async () => {
-              const r = await settingsApi.testModel(newModel);
-              setTestMsg(r.data.ok ? "连接成功：" + (r.data.reply || "").slice(0, 50) : "失败：" + r.data.error);
-            }}>测试连接</Button>
-            <span className="text-xs text-muted self-center">{testMsg}</span>
+
+          <div className="border-t border-line pt-4">
+            <div className="mb-2 text-sm font-medium text-ink">新增模型</div>
+            <div className="grid grid-cols-2 gap-2">
+              <Input placeholder="名称" value={newModel.name} onChange={(e) => setNewModel({ ...newModel, name: e.target.value })} />
+              <Input placeholder="model" value={newModel.model} onChange={(e) => setNewModel({ ...newModel, model: e.target.value })} />
+              <Input placeholder="base_url" value={newModel.base_url} onChange={(e) => setNewModel({ ...newModel, base_url: e.target.value })} />
+              <Input placeholder="api_key" type="password" value={newModel.api_key} onChange={(e) => setNewModel({ ...newModel, api_key: e.target.value })} />
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <Button variant="primary" onClick={addModel}>+ 新增模型</Button>
+              <Button variant="ghost" onClick={testNewModel}>测试连接</Button>
+              <span className="text-xs text-muted">{testMsg}</span>
+            </div>
+            <div className="mt-1 text-xs text-muted">测试连接不会保存配置，只有「新增模型」或「保存」后才会持久化。</div>
           </div>
         </div>
       </Card>
