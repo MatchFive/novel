@@ -105,6 +105,17 @@ class AssistantSession(Base):
         }
 
 
+class AssistantMessage(Base):
+    __tablename__ = "assistant_messages"
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    session_id = Column(CHAR(36), ForeignKey("assistant_sessions.id"), nullable=False, index=True)
+    role = Column(String(32), nullable=False)
+    content = Column(Text, default="")
+    metadata_ = Column("metadata", JSON, default=dict)
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+
 # ---------------- 长篇小说数据（全部 project_id 外键） ----------------
 
 class LongOutline(Base):
