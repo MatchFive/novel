@@ -24,7 +24,7 @@ function StatusBadge({ metadata }: { metadata?: AssistantMessage["metadata"] }) 
       </span>
     );
   }
-  return <span className="text-xs text-muted">✗ 已拒绝</span>;
+  return <span className="text-xs text-muted">✗ 已拒绝 {metadata.rejected_count || 0} 条</span>;
 }
 
 export default function AssistantChat({
@@ -41,14 +41,6 @@ export default function AssistantChat({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, pendingRecords]);
 
-  let lastAssistantIndex = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "assistant") {
-      lastAssistantIndex = i;
-      break;
-    }
-  }
-  const lastAssistant = lastAssistantIndex >= 0 ? messages[lastAssistantIndex] : undefined;
   const showActions = pendingRecords.length > 0;
 
   return (

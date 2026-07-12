@@ -6,6 +6,18 @@ from app.database import create_all, engine, AsyncSessionLocal
 from app.models import AssistantMessage
 
 
+@pytest.fixture(autouse=True)
+async def cleanup_tables():
+    yield
+    async with engine.begin() as conn:
+        for table in (
+            "assistant_messages",
+            "assistant_sessions",
+            "long_change_records",
+            "projects",
+        ):
+            await conn.exec_driver_sql(f"DELETE FROM {table};")
+
 @pytest.fixture(scope="module")
 def anyio_backend():
     return "asyncio"
@@ -153,4 +165,58 @@ async def test_reject_updates_message_metadata():
         latest = assistant_messages[-1]
         assert latest["metadata"].get("status") == "rejected"
         assert latest["metadata"].get("rejected_count") == 1
+
+
+@pytest.mark.anyio
+async def test_confirm_partial_status():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "partial", "description": ""})
+        pid = r.json()["id"]
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        session_id = r.json()["session_id"]
+
+        valid_record = {
+            "id": "partial-record-1",
+            "project_id": pid,
+            "action": "add",
+            "entity_type": "character",
+            "entity_id": None,
+            "before": None,
+            "after": {"name": "Carol"},
+            "requires_confirmation": True,
+        }
+        invalid_record = {
+            "id": "partial-record-2",
+            "project_id": pid,
+            "action": "add",
+            "entity_type": "unknown_entity",
+            "entity_id": None,
+            "before": None,
+            "after": {"name": "Diana"},
+            "requires_confirmation": True,
+        }
+        for record in (valid_record, invalid_record):
+            r = await ac.post("/api/assistant/stage", json={"session_id": session_id, "change_record": record})
+            assert r.status_code == 200
+
+        async with AsyncSessionLocal() as db:
+            msg = AssistantMessage(session_id=session_id, role="assistant", content="summary", metadata_={})
+            db.add(msg)
+            await db.commit()
+
+        r = await ac.post("/api/assistant/confirm", json={"session_id": session_id})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is False
+        assert body.get("errors")
+
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        assert r.status_code == 200
+        assistant_messages = [m for m in r.json()["messages"] if m["role"] == "assistant"]
+        assert assistant_messages
+        latest = assistant_messages[-1]
+        assert latest["metadata"].get("status") == "partial"
+        assert latest["metadata"].get("applied_count") == 1
+        assert latest["metadata"].get("error_count") == 1
 
