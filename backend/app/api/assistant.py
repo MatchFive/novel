@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
-from app.core.llm_client import LLMClient
+from app.core.llm_factory import get_default_llm_client
 from app.database import get_db
 from app.models import AssistantSession, AssistantMessage, Project, UserSetting
 from app.agents.harness.nodes.supervisor import run_supervisor
@@ -75,7 +75,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         logger.exception("Failed to persist user assistant message")
         await db.rollback()
 
-    llm = LLMClient()
+    llm = await get_default_llm_client(db)
     recursive_limit = await _recursive_limit(db)
 
     # 1. 前置取数

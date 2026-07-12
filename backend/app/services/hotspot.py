@@ -57,9 +57,9 @@ class SourceAdapter:
 
 
 class HotspotService:
-    def __init__(self, db: AsyncSession, llm: Optional[LLMClient] = None):
+    def __init__(self, db: AsyncSession, llm: LLMClient):
         self.db = db
-        self.llm = llm or LLMClient()
+        self.llm = llm
 
     async def _sources(self) -> list[dict]:
         res = await self.db.execute(select(UserSetting))

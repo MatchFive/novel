@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
-from app.core.llm_client import LLMClient
+from app.core.llm_factory import get_default_llm_client
 from app.database import get_db
 from app.models import Project
 from app import repositories as repo
@@ -49,7 +49,7 @@ async def continue_writing(project_id: str, body: dict, db: AsyncSession = Depen
         "保持人物性格一致、回收已埋伏笔、呼应大纲。只输出新增正文。\n\n"
         f"=== 上下文 ===\n{context}\n=== 续写要求 ===\n{instruction}"
     )
-    llm = LLMClient()
+    llm = await get_default_llm_client(db)
     messages = [{"role": "user", "content": prompt}]
 
     async def event_gen():

@@ -21,6 +21,7 @@ async def cleanup_tables():
             "long_world_settings",
             "long_plot_nodes",
             "long_chapters",
+            "model_configs",
             "projects",
         ):
             await conn.exec_driver_sql(f"DELETE FROM {table};")
@@ -39,7 +40,7 @@ async def setup_db():
 
 
 @pytest.mark.anyio
-@patch("app.api.assistant.LLMClient")
+@patch("app.core.llm_factory.LLMClient")
 async def test_chat_persists_messages(mock_llm_client):
     mock_llm = mock_llm_client.return_value
     mock_llm.parse_llm_json = AsyncMock(return_value={"intent": "test", "tasks": []})
@@ -247,3 +248,27 @@ async def test_confirm_partial_status():
         assert latest["metadata"].get("status") == "partial"
         assert latest["metadata"].get("applied_count") == 1
         assert latest["metadata"].get("error_count") == 1
+
+
+@pytest.mark.anyio
+async def test_default_model_config_used_by_llm_factory():
+    from app.core.llm_factory import get_default_llm_client
+    from app.models import ModelConfig
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncSessionLocal() as db:
+            cfg = ModelConfig(
+                name="deepseek",
+                base_url="https://api.deepseek.com/v1",
+                api_key="sk-test-key",
+                model="deepseek-v4-flash",
+                is_default=True,
+            )
+            db.add(cfg)
+            await db.commit()
+
+            client = await get_default_llm_client(db)
+            assert client.base_url == "https://api.deepseek.com/v1"
+            assert client.api_key == "sk-test-key"
+            assert client.model == "deepseek-v4-flash"
