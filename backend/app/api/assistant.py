@@ -210,9 +210,10 @@ async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
     if not session_id:
         raise ValidationError("session_id 必填")
     result = await confirm_session(db, session_id)
-    await _mark_latest_assistant_message(
-        db, session_id, "applied", len(result.get("applied", []))
-    )
+    if result.get("ok"):
+        await _mark_latest_assistant_message(
+            db, session_id, "applied", len(result.get("applied", []))
+        )
     return result
 
 

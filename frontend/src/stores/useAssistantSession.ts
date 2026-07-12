@@ -48,7 +48,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
     try {
       const { data } = await assistantApi.chat(pid, text);
       const assistantMsg: AssistantMessage = {
-        id: data.message_id,
+        id: data.message_id || `local-assistant-${Date.now()}`,
         role: "assistant",
         content: data.summary,
         metadata: {
@@ -101,6 +101,13 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
     set({ busy: true, error: null });
     try {
       const { data } = await assistantApi.confirm(sessionId);
+      if (!data.ok) {
+        const errorText = (data.errors || [])
+          .map((e: any) => e.message || String(e))
+          .join("；") || "应用失败";
+        set({ error: errorText });
+        return;
+      }
       set((s) => {
         const messages = [...s.messages];
         let lastAssistant = -1;

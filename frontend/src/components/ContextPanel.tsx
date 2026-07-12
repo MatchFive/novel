@@ -22,12 +22,20 @@ interface ContextPanelProps {
 export default function ContextPanel({ pid, open, onToggle, onQuote, onEdit }: ContextPanelProps) {
   const [active, setActive] = useState("character");
   const [items, setItems] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     const category = CATEGORIES.find((c) => c.key === active);
     if (!category) return;
-    category.list(pid).then(({ data }) => setItems(data || []));
+    setError(null);
+    category
+      .list(pid)
+      .then(({ data }) => setItems(data || []))
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "加载失败");
+        setItems([]);
+      });
   }, [pid, active, open]);
 
   const activeCategory = CATEGORIES.find((c) => c.key === active)!;
@@ -59,7 +67,10 @@ export default function ContextPanel({ pid, open, onToggle, onQuote, onEdit }: C
           </div>
 
           <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
-            {items.map((it) => {
+            {error && (
+              <div className="col-span-full text-xs text-accent">加载失败：{error}</div>
+            )}
+            {!error && items.map((it) => {
               const name = it[activeCategory.nameField] || "（未命名）";
               return (
                 <Card key={it.id} className="p-2 text-xs">
@@ -85,7 +96,9 @@ export default function ContextPanel({ pid, open, onToggle, onQuote, onEdit }: C
                 </Card>
               );
             })}
-            {items.length === 0 && <div className="text-xs text-muted">暂无{activeCategory.label}</div>}
+            {!error && items.length === 0 && (
+              <div className="col-span-full text-xs text-muted">暂无{activeCategory.label}</div>
+            )}
           </div>
         </div>
       )}
