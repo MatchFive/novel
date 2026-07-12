@@ -31,3 +31,17 @@ export interface ChangeRecord {
   after: any;
   requires_confirmation: boolean;
 }
+
+export interface AssistantMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  metadata?: {
+    intent?: string;
+    change_record_ids?: string[];
+    status?: "applied" | "rejected";
+    applied_count?: number;
+    rejected_count?: number;
+  };
+  created_at: string | null;
+}
