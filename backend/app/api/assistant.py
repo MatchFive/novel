@@ -189,7 +189,8 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         # 7. 触发历史摘要压缩
         sess.message_count += 2
         if should_summarize(sess, settings_obj):
-            recent = historical_messages[-(settings_obj.assistant_summary_threshold * 2):]
+            threshold = settings_obj.assistant_summary_threshold or 20
+            recent = historical_messages[-(threshold * 2):]
             summary_text = await summarize_messages(recent, settings_obj, llm)
             append_summary(sess, recent, summary_text, settings_obj)
             await db.commit()
