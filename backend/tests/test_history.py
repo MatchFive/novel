@@ -96,12 +96,38 @@ def test_append_summary_resets_message_count_and_appends_turn_range():
         AssistantMessage(session_id="s1", role="user", content="c"),
         AssistantMessage(session_id="s1", role="assistant", content="d"),
     ]
-    append_summary(session, messages, "second summary")
+    settings = UserSetting(assistant_max_summaries=5)
+    append_summary(session, messages, "second summary", settings)
 
     assert session.message_count == 0
     assert len(session.summaries) == 2
     assert session.summaries[-1]["turn_range"] == "3-4"
     assert session.summaries[-1]["summary"] == "second summary"
+
+
+def test_append_summary_caps_to_max_summaries_keeps_most_recent():
+    session = AssistantSession(
+        id="s1",
+        project_id="p1",
+        summaries=[
+            {"turn_range": "1-1", "summary": "one"},
+            {"turn_range": "2-2", "summary": "two"},
+        ],
+        message_count=2,
+    )
+    messages = [
+        AssistantMessage(session_id="s1", role="user", content="a"),
+        AssistantMessage(session_id="s1", role="assistant", content="b"),
+    ]
+    settings = UserSetting(assistant_max_summaries=2)
+    append_summary(session, messages, "three", settings)
+
+    assert session.message_count == 0
+    assert len(session.summaries) == 2
+    assert session.summaries[0]["summary"] == "two"
+    assert session.summaries[1]["summary"] == "three"
+    assert session.summaries[1]["turn_range"] == "3-3"
+    assert not any(s["summary"] == "one" for s in session.summaries)
 
 
 def test_build_history_context_respects_max_summaries():

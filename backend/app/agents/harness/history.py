@@ -74,7 +74,12 @@ async def summarize_messages(
     return summary[:max_len]
 
 
-def append_summary(session: AssistantSession, messages: list[AssistantMessage], summary_text: str) -> None:
+def append_summary(
+    session: AssistantSession,
+    messages: list[AssistantMessage],
+    summary_text: str,
+    settings: UserSetting,
+) -> None:
     """把新生成的摘要加入 session，并清理超出限制的摘要。"""
     summaries = list(session.summaries or [])
     total_turns = len(messages) // 2
@@ -89,5 +94,6 @@ def append_summary(session: AssistantSession, messages: list[AssistantMessage], 
         "turn_range": f"{start_turn}-{end_turn}",
         "summary": summary_text,
     })
-    session.summaries = summaries
+    max_summaries = max(1, settings.assistant_max_summaries or 1)
+    session.summaries = summaries[-max_summaries:]
     session.message_count = 0
