@@ -130,6 +130,45 @@ def test_append_summary_caps_to_max_summaries_keeps_most_recent():
     assert not any(s["summary"] == "one" for s in session.summaries)
 
 
+def test_build_history_context_returns_no_summaries_when_max_summaries_is_zero():
+    session = AssistantSession(
+        id="s1",
+        summaries=[{"turn_range": "1-1", "summary": "old"}],
+        message_count=2,
+    )
+    messages = [
+        AssistantMessage(session_id="s1", role="user", content="hi"),
+        AssistantMessage(session_id="s1", role="assistant", content="hello"),
+    ]
+    settings = UserSetting(assistant_max_summaries=0)
+    context = build_history_context(session, messages, settings)
+    assert not any("历史摘要" in msg["content"] for msg in context)
+    assert len(context) == 2
+    assert context[0] == {"role": "user", "content": "hi"}
+    assert context[1] == {"role": "assistant", "content": "hello"}
+
+
+def test_append_summary_does_not_append_when_max_summaries_is_zero_but_resets_count():
+    session = AssistantSession(
+        id="s1",
+        project_id="p1",
+        summaries=[{"turn_range": "1-1", "summary": "first"}],
+        message_count=4,
+    )
+    messages = [
+        AssistantMessage(session_id="s1", role="user", content="a"),
+        AssistantMessage(session_id="s1", role="assistant", content="b"),
+        AssistantMessage(session_id="s1", role="user", content="c"),
+        AssistantMessage(session_id="s1", role="assistant", content="d"),
+    ]
+    settings = UserSetting(assistant_max_summaries=0)
+    append_summary(session, messages, "second summary", settings)
+
+    assert session.message_count == 0
+    assert len(session.summaries) == 1
+    assert session.summaries[0]["summary"] == "first"
+
+
 def test_build_history_context_respects_max_summaries():
     session = AssistantSession(
         id="s1",

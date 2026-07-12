@@ -325,3 +325,84 @@ async def test_default_model_config_used_by_llm_factory():
             assert client.base_url == "https://api.deepseek.com/v1"
             assert client.api_key == "sk-test-key"
             assert client.model == "deepseek-v4-flash"
+
+
+@pytest.mark.anyio
+async def test_create_session_deactivates_previous_and_increments_title():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "sessions", "description": ""})
+        assert r.status_code == 200
+        pid = r.json()["id"]
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        assert r.status_code == 200
+        first = r.json()
+        assert first["title"] == "对话 1"
+        assert first["is_active"] is True
+
+        r = await ac.post(f"/api/assistant/session/{pid}")
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        second = r.json()["session"]
+        assert second["title"] == "对话 2"
+        assert second["is_active"] is True
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        assert r.json()["id"] == second["id"]
+        assert r.json()["is_active"] is True
+
+        r = await ac.get(f"/api/assistant/sessions/{pid}")
+        assert r.status_code == 200
+        sessions = r.json()["sessions"]
+        assert len(sessions) == 2
+        by_id = {s["id"]: s for s in sessions}
+        assert by_id[first["id"]]["is_active"] is False
+        assert by_id[second["id"]]["is_active"] is True
+
+
+@pytest.mark.anyio
+async def test_list_sessions_ordered_by_updated_at_desc():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "order", "description": ""})
+        pid = r.json()["id"]
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        first_id = r.json()["id"]
+
+        r = await ac.post(f"/api/assistant/session/{pid}")
+        second_id = r.json()["session"]["id"]
+
+        # switch back to first to bump its updated_at
+        r = await ac.post(f"/api/assistant/session/{first_id}/switch")
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+
+        r = await ac.get(f"/api/assistant/sessions/{pid}")
+        sessions = r.json()["sessions"]
+        assert [s["id"] for s in sessions] == [first_id, second_id]
+
+
+@pytest.mark.anyio
+async def test_switch_session_changes_history():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "switch", "description": ""})
+        pid = r.json()["id"]
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        first_id = r.json()["id"]
+
+        r = await ac.post(f"/api/assistant/session/{pid}")
+        second_id = r.json()["session"]["id"]
+
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        assert r.json()["session_id"] == second_id
+
+        r = await ac.post(f"/api/assistant/session/{first_id}/switch")
+        assert r.json()["ok"] is True
+
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        assert r.json()["session_id"] == first_id
+

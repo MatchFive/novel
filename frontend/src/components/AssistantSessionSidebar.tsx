@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { Button } from "@/components/ui";
 import type { AssistantSession } from "@/types";
 
@@ -11,10 +10,6 @@ interface Props {
 }
 
 export default function AssistantSessionSidebar({ pid, sessions, activeId, onCreate, onSwitch }: Props) {
-  useEffect(() => {
-    // 首次挂载由父组件 load
-  }, [pid]);
-
   return (
     <div className="flex h-full w-52 shrink-0 flex-col border-r border-line bg-surface">
       <div className="border-b border-line p-3">
@@ -28,6 +23,7 @@ export default function AssistantSessionSidebar({ pid, sessions, activeId, onCre
           <button
             key={s.id}
             onClick={() => onSwitch(s.id)}
+            aria-current={s.id === activeId ? "true" : undefined}
             className={
               "mb-1 w-full rounded border px-3 py-2 text-left text-sm " +
               (s.id === activeId

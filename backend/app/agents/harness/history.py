@@ -4,6 +4,11 @@ from __future__ import annotations
 from app.models import AssistantMessage, AssistantSession, UserSetting
 
 
+def _max_summaries(settings: UserSetting) -> int:
+    """返回最大保留摘要数，显式设置的 0 是合法值。"""
+    return settings.assistant_max_summaries if settings.assistant_max_summaries is not None else 5
+
+
 def build_history_context(
     session: AssistantSession,
     messages: list[AssistantMessage],
@@ -12,7 +17,11 @@ def build_history_context(
     """返回历史摘要 + 最近具体消息（不含 system prompt 与当前输入）。"""
     out: list[dict[str, str]] = []
 
-    summaries = (session.summaries or [])[-(settings.assistant_max_summaries or 5) :]
+    max_summaries = _max_summaries(settings)
+    if max_summaries == 0:
+        summaries = []
+    else:
+        summaries = (session.summaries or [])[-max_summaries:]
     for i, s in enumerate(summaries):
         out.append({
             "role": "user",
@@ -94,6 +103,9 @@ def append_summary(
         "turn_range": f"{start_turn}-{end_turn}",
         "summary": summary_text,
     })
-    max_summaries = max(1, settings.assistant_max_summaries or 1)
+    max_summaries = _max_summaries(settings)
+    if max_summaries == 0:
+        session.message_count = 0
+        return
     session.summaries = summaries[-max_summaries:]
     session.message_count = 0

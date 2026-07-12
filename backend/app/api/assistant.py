@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import NotFoundError, ValidationError
+from app.core.errors import AppError, NotFoundError, ValidationError
 from app.core.llm_factory import get_default_llm_client
 from app.database import get_db
 from app.models import AssistantSession, AssistantMessage, Project, UserSetting
@@ -60,14 +60,6 @@ async def _get_active_session(db, project_id) -> AssistantSession:
     return s
 
 
-async def _deactivate_other_sessions(db, project_id: str, keep_id: str) -> None:
-    await db.execute(
-        update(AssistantSession)
-        .where(AssistantSession.project_id == project_id, AssistantSession.id != keep_id)
-        .values(is_active=False)
-    )
-
-
 async def _recursive_limit(db) -> int:
     res = await db.execute(select(UserSetting))
     s = res.scalars().first()
@@ -98,6 +90,11 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     except Exception:
         logger.exception("Failed to persist user assistant message")
         await db.rollback()
+        raise AppError(
+            "无法保存用户消息，请稍后重试",
+            code="PERSIST_FAILED",
+            status_code=500,
+        )
 
     llm = await get_default_llm_client(db)
     recursive_limit = await _recursive_limit(db)

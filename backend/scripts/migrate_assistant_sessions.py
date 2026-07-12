@@ -2,8 +2,18 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from pathlib import Path
+
+script_dir = Path(__file__).resolve().parent
+backend_dir = script_dir.parent
+repo_root = backend_dir.parent
+for d in (str(backend_dir), str(repo_root)):
+    if d not in sys.path:
+        sys.path.insert(0, d)
 
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from app.database import engine
 
 
@@ -29,8 +39,12 @@ async def migrate() -> None:
                 try:
                     await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
                     print(f"Added {table}.{name}")
-                except Exception as e:
-                    print(f"Skip {table}.{name}: {e}")
+                except OperationalError as e:
+                    msg = str(e).lower()
+                    if "duplicate column" in msg or "already exists" in msg:
+                        print(f"Skip {table}.{name}: {e}")
+                    else:
+                        raise
         # 修正现有 session：每个 project 保留第一条为 active
         await conn.execute(text("""
             UPDATE assistant_sessions
