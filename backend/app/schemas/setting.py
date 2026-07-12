@@ -1,0 +1,31 @@
+from __future__ import annotations
+from typing import Optional, Any
+from pydantic import BaseModel, Field
+
+
+class ModelConfigCreate(BaseModel):
+    name: str
+    base_url: str
+    api_key: str = ""
+    model: str
+    is_default: bool = False
+
+
+class ModelConfigUpdate(BaseModel):
+    name: Optional[str] = None
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+    is_default: Optional[bool] = None
+
+
+class ModelConfigTest(BaseModel):
+    base_url: str
+    api_key: str = ""
+    model: str
+
+
+class UserSettingUpdate(BaseModel):
+    recursive_limit: Optional[int] = None
+    hotspot_sources: Optional[list] = None
+    theme: Optional[str] = None

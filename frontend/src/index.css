@@ -1,0 +1,67 @@
+/* 温暖纸感文学风 — 暖褐书香
+   字体策略：标题走系统宋体栈（离线可靠）。如需联网统一字体，可在 index.html 加入：
+   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700&display=swap" rel="stylesheet"> */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --paper: #faf6ee;
+  --surface: #fffdf8;
+  --surface-2: #f3ecdf;
+  --ink: #3a2c22;
+  --ink-soft: #6b5d4f;
+  --muted: #9a8c7b;
+  --line: #e6dccb;
+  --accent: #b07a3c;
+  --accent-strong: #8f5f2c;
+  --accent-soft: #f0e4d2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.01em;
+}
+
+button {
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  border-radius: 8px;
+}
+
+/* 暖灰细线分割 */
+.hairline {
+  border-color: var(--line);
+}
+
+/* 滚动条极简（暖灰） */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d8cdb8;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
