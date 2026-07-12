@@ -159,6 +159,22 @@ async def get_session_history(project_id: str, db: AsyncSession = Depends(get_db
     return {"ok": True, "session_id": sess.id, "messages": messages, "staged_changes": sess.staged_changes or []}
 
 
+@router.post("/stage")
+async def stage_change(body: dict, db: AsyncSession = Depends(get_db)):
+    session_id = body.get("session_id")
+    record = body.get("change_record")
+    if not session_id or not record:
+        raise ValidationError("session_id 与 change_record 必填")
+    sess = await db.get(AssistantSession, session_id)
+    if not sess:
+        raise NotFoundError("会话不存在")
+    staged = list(sess.staged_changes or [])
+    staged.append(record)
+    sess.staged_changes = staged
+    await db.commit()
+    return {"ok": True, "staged_changes": staged}
+
+
 @router.post("/confirm")
 async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
     session_id = body.get("session_id")
