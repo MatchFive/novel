@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator, Optional
 import httpx
 
 from app.config import settings
+from app.core.errors import AppError
 
 
 class LLMClient:
@@ -30,6 +31,14 @@ class LLMClient:
             "Content-Type": "application/json",
         }
 
+    def _ensure_api_key(self) -> None:
+        if not self.api_key or not str(self.api_key).strip():
+            raise AppError(
+                "LLM API key 未配置，请在项目根目录 .env 文件中设置 LLM_API_KEY",
+                code="LLM_NOT_CONFIGURED",
+                status_code=503,
+            )
+
     async def chat(
         self,
         messages: list[dict[str, str]],
@@ -39,6 +48,7 @@ class LLMClient:
         response_format: Optional[dict] = None,
         timeout: Optional[float] = None,
     ) -> str:
+        self._ensure_api_key()
         payload: dict[str, Any] = {
             "model": model or self.model,
             "messages": messages,
@@ -63,6 +73,7 @@ class LLMClient:
         model: Optional[str] = None,
         temperature: Optional[float] = None,
     ) -> AsyncIterator[str]:
+        self._ensure_api_key()
         payload: dict[str, Any] = {
             "model": model or self.model,
             "messages": messages,

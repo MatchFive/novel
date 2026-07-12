@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 from app.main import app
 from app.database import create_all, engine, AsyncSessionLocal
 from app.models import AssistantMessage
+from app.config import settings
 
 
 @pytest.fixture(autouse=True)
@@ -174,6 +175,27 @@ async def test_reject_updates_message_metadata():
 
 
 @pytest.mark.anyio
+async def test_chat_returns_llm_config_error_when_key_missing():
+    original_key = settings.llm_api_key
+    settings.llm_api_key = ""
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            r = await ac.post("/api/projects", json={"type": "long", "title": "missing-key", "description": ""})
+            assert r.status_code == 200
+            pid = r.json()["id"]
+
+            r = await ac.post("/api/assistant/chat", json={"project_id": pid, "message": "hello"})
+            assert r.status_code == 503
+            body = r.json()
+            assert body["ok"] is False
+            assert body["code"] == "LLM_NOT_CONFIGURED"
+            assert "LLM_API_KEY" in body["message"]
+    finally:
+        settings.llm_api_key = original_key
+
+
+@pytest.mark.anyio
 async def test_confirm_partial_status():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -225,4 +247,3 @@ async def test_confirm_partial_status():
         assert latest["metadata"].get("status") == "partial"
         assert latest["metadata"].get("applied_count") == 1
         assert latest["metadata"].get("error_count") == 1
-
