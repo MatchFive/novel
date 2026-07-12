@@ -4,13 +4,20 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError, ValidationError
 from app.core.llm_factory import get_default_llm_client
 from app.database import get_db
 from app.models import AssistantSession, AssistantMessage, Project, UserSetting
+from app.agents.harness.history import (
+    build_history_context,
+    build_messages,
+    should_summarize,
+    summarize_messages,
+    append_summary,
+)
 from app.agents.harness.nodes.supervisor import run_supervisor
 from app.agents.harness.workers import (
     CharacterWorker, WorldWorker, OutlineWorker, PlotWorker, ForeshadowWorker,
@@ -32,16 +39,33 @@ _WORKERS = {
 }
 
 
-async def _ensure_session(db, project_id) -> AssistantSession:
+async def _get_active_session(db, project_id) -> AssistantSession:
     res = await db.execute(
-        select(AssistantSession).where(AssistantSession.project_id == project_id))
+        select(AssistantSession)
+        .where(AssistantSession.project_id == project_id, AssistantSession.is_active == True)  # noqa: E712
+    )
     s = res.scalars().first()
     if not s:
-        s = AssistantSession(project_id=project_id, staged_changes=[])
+        s = AssistantSession(
+            project_id=project_id,
+            title="对话 1",
+            is_active=True,
+            staged_changes=[],
+            summaries=[],
+            message_count=0,
+        )
         db.add(s)
         await db.commit()
         await db.refresh(s)
     return s
+
+
+async def _deactivate_other_sessions(db, project_id: str, keep_id: str) -> None:
+    await db.execute(
+        update(AssistantSession)
+        .where(AssistantSession.project_id == project_id, AssistantSession.id != keep_id)
+        .values(is_active=False)
+    )
 
 
 async def _recursive_limit(db) -> int:
@@ -61,7 +85,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     if not proj:
         raise NotFoundError("项目不存在")
 
-    sess = await _ensure_session(db, project_id)
+    sess = await _get_active_session(db, project_id)
     try:
         user_msg = AssistantMessage(
             session_id=sess.id,
@@ -78,6 +102,19 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     llm = await get_default_llm_client(db)
     recursive_limit = await _recursive_limit(db)
 
+    hist_res = await db.execute(
+        select(AssistantMessage)
+        .where(AssistantMessage.session_id == sess.id)
+        .order_by(AssistantMessage.created_at.asc())
+    )
+    historical_messages = hist_res.scalars().all()
+
+    settings_row = (await db.execute(select(UserSetting))).scalars().first()
+    settings_obj = settings_row or UserSetting()
+
+    # 历史上下文（摘要 + 最近消息），不含 system 与当前输入
+    history_context = build_history_context(sess, historical_messages, settings_obj)
+
     # 1. 前置取数
     from app import repositories as repo
     context = {
@@ -88,8 +125,19 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         "plot": await repo.list_plot(db, project_id),
     }
 
-    # 2. Supervisor 拆分
-    plan = await run_supervisor(llm, user_input, context)
+    # 2. Supervisor 拆分（使用完整 messages）
+    supervisor_msgs = build_messages(
+        "你是小说创作助手的调度器。根据用户指令与项目现有数据，判断需要派发哪些专精 Worker 来处理。"
+        "可选 Worker：character（角色设计/调整）、world（世界观设定）、outline（大纲生成/调整）、"
+        "plot（剧情节点编排）、foreshadow（伏笔埋设/回收）。请返回 JSON："
+        '{"intent": "一句话意图", "tasks": [{"worker": "character", "goal": "..."}, ...]}。'
+        "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。",
+        sess,
+        historical_messages,
+        user_input,
+        settings_obj,
+    )
+    plan = await run_supervisor(llm, supervisor_msgs)
     logger.warning("Assistant supervisor plan: %s", plan)
 
     # 3. 派发 Worker（仅通过只读工具取数，产出结构化结果，不落库）
@@ -100,7 +148,10 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         if not wcls:
             continue
         goal = task.get("goal", user_input)
-        result = await run_worker(wcls, db, llm, recursive_limit, goal, context)
+        result = await run_worker(
+            wcls, db, llm, recursive_limit, goal, context,
+            history_context=history_context,
+        )
         result["worker"] = wname
         logger.warning("Worker %s result: %s", wname, result)
         worker_results.append(result)
@@ -116,7 +167,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     # 6. responder 摘要
-    summary = await respond(llm, records)
+    summary = await respond(llm, records, history_context=history_context)
 
     records_data = [r.model_dump() for r in records]
     assistant_msg_id = None
@@ -134,6 +185,15 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         await db.commit()
         await db.refresh(assistant_msg)
         assistant_msg_id = assistant_msg.id
+
+        # 7. 触发历史摘要压缩
+        sess.message_count += 2
+        if should_summarize(sess, settings_obj):
+            recent = historical_messages[-(settings_obj.assistant_summary_threshold * 2):]
+            summary_text = await summarize_messages(recent, settings_obj, llm)
+            append_summary(sess, recent, summary_text, settings_obj)
+            await db.commit()
+            await db.refresh(sess)
     except Exception:
         logger.exception("Failed to persist assistant message")
         await db.rollback()
@@ -150,13 +210,71 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
 
 @router.get("/session/{project_id}")
 async def get_session(project_id: str, db: AsyncSession = Depends(get_db)):
-    sess = await _ensure_session(db, project_id)
+    sess = await _get_active_session(db, project_id)
     return sess.to_dict()
+
+
+@router.post("/session/{project_id}")
+async def create_session(project_id: str, db: AsyncSession = Depends(get_db)):
+    proj = await db.get(Project, project_id)
+    if not proj:
+        raise NotFoundError("项目不存在")
+
+    # 旧 session 全部置 inactive
+    await db.execute(
+        update(AssistantSession)
+        .where(AssistantSession.project_id == project_id)
+        .values(is_active=False)
+    )
+
+    count_res = await db.execute(
+        select(func.count()).where(AssistantSession.project_id == project_id)
+    )
+    count = count_res.scalar() or 0
+    new_session = AssistantSession(
+        project_id=project_id,
+        title=f"对话 {count + 1}",
+        is_active=True,
+        staged_changes=[],
+        summaries=[],
+        message_count=0,
+    )
+    db.add(new_session)
+    await db.commit()
+    await db.refresh(new_session)
+    return {"ok": True, "session": new_session.to_dict()}
+
+
+@router.get("/sessions/{project_id}")
+async def list_sessions(project_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(AssistantSession)
+        .where(AssistantSession.project_id == project_id)
+        .order_by(AssistantSession.updated_at.desc())
+    )
+    sessions = [s.to_dict() for s in res.scalars().all()]
+    return {"ok": True, "sessions": sessions}
+
+
+@router.post("/session/{session_id}/switch")
+async def switch_session(session_id: str, db: AsyncSession = Depends(get_db)):
+    sess = await db.get(AssistantSession, session_id)
+    if not sess:
+        raise NotFoundError("会话不存在")
+    await db.execute(
+        update(AssistantSession)
+        .where(AssistantSession.project_id == sess.project_id)
+        .values(is_active=False)
+    )
+    sess.is_active = True
+    await db.commit()
+    await db.refresh(sess)
+    return {"ok": True, "session": sess.to_dict()}
 
 
 @router.get("/session/{project_id}/history")
 async def get_session_history(project_id: str, db: AsyncSession = Depends(get_db)):
-    sess = await _ensure_session(db, project_id)
+    sess = await _get_active_session(db, project_id)
     res = await db.execute(
         select(AssistantMessage)
         .where(AssistantMessage.session_id == sess.id)

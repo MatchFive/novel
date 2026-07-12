@@ -24,12 +24,18 @@ class WorkerBase:
         self.recursive_limit = min(max(recursive_limit, 1), app_settings.recursive_limit_hard_cap)
         self.timeout = timeout
 
-    async def _tool_loop(self, system_prompt: str, user_prompt: str, extra_tools: list[dict] | None = None) -> dict:
+    async def _tool_loop(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        extra_tools: list[dict] | None = None,
+        history_context: list[dict] | None = None,
+    ) -> dict:
         """标准 tool-calling 循环：LLM 可多次调用只读工具取数，最终产出结构化结果。"""
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
+        messages = [{"role": "system", "content": system_prompt}]
+        if history_context:
+            messages.extend(history_context)
+        messages.append({"role": "user", "content": user_prompt})
         schemas = tool_schemas() + (extra_tools or [])
         calls = 0
         start = time.time()
@@ -132,6 +138,7 @@ async def run_worker(
     recursive_limit: int,
     goal: str,
     context: dict,
+    history_context: list[dict] | None = None,
 ) -> dict:
     worker = worker_cls(db, llm, recursive_limit)
-    return await worker.run(goal, context)
+    return await worker.run(goal, context, history_context)

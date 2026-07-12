@@ -16,12 +16,12 @@ def render_records(records: list[ChangeRecord]) -> str:
     return "\n".join(lines) or "（无变更）"
 
 
-async def respond(llm: LLMClient, records: list[ChangeRecord]) -> str:
+async def respond(llm: LLMClient, records: list[ChangeRecord], history_context: list[dict] | None = None) -> str:
     listing = render_records(records)
-    msgs = [
-        {"role": "system", "content": RESPONDER_PROMPT},
-        {"role": "user", "content": f"变更清单：\n{listing}"},
-    ]
+    msgs = [{"role": "system", "content": RESPONDER_PROMPT}]
+    if history_context:
+        msgs.extend(history_context)
+    msgs.append({"role": "user", "content": f"变更清单：\n{listing}"})
     try:
         return await llm.chat(msgs)
     except Exception:
