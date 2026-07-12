@@ -39,9 +39,10 @@ export interface AssistantMessage {
   metadata?: {
     intent?: string;
     change_record_ids?: string[];
-    status?: "applied" | "rejected";
+    status?: "applied" | "rejected" | "partial";
     applied_count?: number;
     rejected_count?: number;
+    error_count?: number;
   };
   created_at: string | null;
 }

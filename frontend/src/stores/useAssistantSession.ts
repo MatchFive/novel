@@ -114,34 +114,43 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
     set({ busy: true, error: null });
     try {
       const { data } = await assistantApi.confirm(sessionId);
+      const messages = [...get().messages];
+      let lastAssistant = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === "assistant") {
+          lastAssistant = i;
+          break;
+        }
+      }
       if (!data.ok) {
         const errorText = (data.errors || [])
           .map((e: any) => e.message || String(e))
           .join("；") || "应用失败";
-        set({ error: errorText, pendingRecords: [] });
-        return;
-      }
-      set((s) => {
-        const messages = [...s.messages];
-        let lastAssistant = -1;
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === "assistant") {
-            lastAssistant = i;
-            break;
-          }
-        }
         if (lastAssistant >= 0) {
           messages[lastAssistant] = {
             ...messages[lastAssistant],
             metadata: {
               ...messages[lastAssistant].metadata,
-              status: "applied",
+              status: "partial",
               applied_count: (data.applied || []).length,
+              error_count: (data.errors || []).length,
             },
           };
         }
-        return { messages, pendingRecords: [] };
-      });
+        set({ error: errorText, messages, pendingRecords: [] });
+        return;
+      }
+      if (lastAssistant >= 0) {
+        messages[lastAssistant] = {
+          ...messages[lastAssistant],
+          metadata: {
+            ...messages[lastAssistant].metadata,
+            status: "applied",
+            applied_count: (data.applied || []).length,
+          },
+        };
+      }
+      set({ messages, pendingRecords: [] });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "应用失败" });
     } finally {

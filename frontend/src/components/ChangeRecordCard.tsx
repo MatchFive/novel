@@ -25,7 +25,7 @@ function formatValue(v: unknown): string {
 function diffFields(before: any, after: any): { key: string; before: string; after: string }[] {
   const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
   return Array.from(keys)
-    .filter((k) => before?.[k] !== after?.[k])
+    .filter((k) => JSON.stringify(before?.[k]) !== JSON.stringify(after?.[k]))
     .map((k) => ({
       key: k,
       before: formatValue(before?.[k]),

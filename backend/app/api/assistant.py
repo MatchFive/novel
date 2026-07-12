@@ -200,7 +200,7 @@ async def stage_change(body: dict, db: AsyncSession = Depends(get_db)):
     return {"ok": True, "staged_changes": staged}
 
 
-async def _mark_latest_assistant_message(db, session_id: str, status: str, count: int = 0):
+async def _mark_latest_assistant_message(db, session_id: str, status: str, count: int = 0, error_count: int = 0):
     res = await db.execute(
         select(AssistantMessage)
         .where(AssistantMessage.session_id == session_id, AssistantMessage.role == "assistant")
@@ -211,7 +211,11 @@ async def _mark_latest_assistant_message(db, session_id: str, status: str, count
     if msg:
         meta = dict(msg.metadata_ or {})
         meta["status"] = status
-        meta[f"{status}_count"] = count
+        if status == "partial":
+            meta["applied_count"] = count
+            meta["error_count"] = error_count
+        else:
+            meta[f"{status}_count"] = count
         msg.metadata_ = meta
         await db.commit()
 
@@ -225,6 +229,12 @@ async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
     if result.get("ok"):
         await _mark_latest_assistant_message(
             db, session_id, "applied", len(result.get("applied", []))
+        )
+    else:
+        await _mark_latest_assistant_message(
+            db, session_id, "partial",
+            len(result.get("applied", [])),
+            len(result.get("errors", []))
         )
     return result
 

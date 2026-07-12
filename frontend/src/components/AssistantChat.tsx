@@ -17,6 +17,13 @@ function StatusBadge({ metadata }: { metadata?: AssistantMessage["metadata"] }) 
   if (metadata.status === "applied") {
     return <span className="text-xs text-accent">✓ 已应用 {metadata.applied_count || 0} 条</span>;
   }
+  if (metadata.status === "partial") {
+    return (
+      <span className="text-xs text-accent">
+        ⚠ 部分应用：已应用 {metadata.applied_count || 0} 条，失败 {metadata.error_count || 0} 条
+      </span>
+    );
+  }
   return <span className="text-xs text-muted">✗ 已拒绝</span>;
 }
 
