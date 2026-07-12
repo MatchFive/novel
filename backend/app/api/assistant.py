@@ -178,6 +178,18 @@ async def stage_change(body: dict, db: AsyncSession = Depends(get_db)):
     record = body.get("change_record")
     if not session_id or not record:
         raise ValidationError("session_id 与 change_record 必填")
+    if not isinstance(record, dict):
+        raise ValidationError("change_record 必须是对象")
+    required = ("id", "action", "entity_type")
+    for key in required:
+        value = record.get(key)
+        if not value or not isinstance(value, str):
+            raise ValidationError(f"change_record.{key} 不能为空字符串")
+    after = record.get("after")
+    if not after or not isinstance(after, dict):
+        raise ValidationError("change_record.after 必须是非空对象")
+    if not isinstance(record.get("requires_confirmation"), bool):
+        raise ValidationError("change_record.requires_confirmation 必须是布尔值")
     sess = await db.get(AssistantSession, session_id)
     if not sess:
         raise NotFoundError("会话不存在")

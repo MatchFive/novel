@@ -23,6 +23,7 @@ _ENTITY_REPO = {
     "foreshadow": (repo.get_foreshadow, repo.create_foreshadow, repo.update_foreshadow, repo.delete_foreshadow),
     "world": (repo.get_world, repo.create_world, repo.update_world, repo.delete_world),
     "plot": (repo.get_plot, repo.create_plot, repo.update_plot, repo.delete_plot),
+    "chapter": (repo.get_chapter, repo.create_chapter, repo.update_chapter, repo.delete_chapter),
 }
 
 
@@ -84,22 +85,25 @@ async def confirm_session(db: AsyncSession, session_id: str) -> dict:
     staged = sess.staged_changes or []
     applied = []
     errors = []
+    success_ids = set()
     for ch in staged:
         try:
             r = await apply_change(db, project_id, ch)
             applied.append(r)
+            success_ids.add(ch.get("id"))
         except AppError as e:
             errors.append({"change_id": ch.get("id"), "code": e.code, "message": e.message})
-    # 记录到 long_change_records（状态 applied）
+    # 记录到 long_change_records（仅成功项）
     for ch in staged:
-        db.add(LongChangeRecord(
-            project_id=project_id,
-            entity_type=ch.get("entity_type"),
-            entity_id=ch.get("entity_id"),
-            before=ch.get("before"),
-            after=ch.get("after"),
-            status="applied",
-        ))
+        if ch.get("id") in success_ids:
+            db.add(LongChangeRecord(
+                project_id=project_id,
+                entity_type=ch.get("entity_type"),
+                entity_id=ch.get("entity_id"),
+                before=ch.get("before"),
+                after=ch.get("after"),
+                status="applied",
+            ))
     sess.staged_changes = []
     await db.commit()
     return {"ok": len(errors) == 0, "applied": applied, "errors": errors}

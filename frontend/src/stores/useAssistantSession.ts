@@ -67,7 +67,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
       set((s) => ({
         error: errorText,
         messages: [
-          ...s.messages.filter((m) => m.id !== userMsg.id),
+          ...s.messages,
           {
             id: `error-${Date.now()}`,
             role: "assistant",
@@ -87,9 +87,22 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
     set({ error: null });
     try {
       await assistantApi.stage(sessionId, record);
-      set((s) => ({
-        pendingRecords: [...s.pendingRecords, record],
-      }));
+      set((s) => {
+        const messages = [...s.messages];
+        const latestAssistant = messages.slice().reverse().find((m) => m.role === "assistant");
+        if (!latestAssistant || latestAssistant.metadata?.status) {
+          messages.push({
+            id: `local-staged-${Date.now()}`,
+            role: "assistant",
+            content: "以下是你手动编辑的变更建议，请确认。",
+            created_at: new Date().toISOString(),
+          });
+        }
+        return {
+          messages,
+          pendingRecords: [...s.pendingRecords, record],
+        };
+      });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "暂存变更失败" });
     }
