@@ -43,12 +43,14 @@ async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
     try:
         if entity_type == "world":
             # 世界观 content 应为文本；LLM 有时会返回 JSON 对象，需要兼容
-            content = after.get("content")
-            if not isinstance(content, str):
-                after["content"] = json.dumps(content, ensure_ascii=False) if isinstance(content, (dict, list)) else str(content)
-            category = after.get("category")
-            if not isinstance(category, str):
-                after["category"] = str(category)
+            if "content" in after:
+                content = after["content"]
+                if not isinstance(content, str):
+                    after["content"] = json.dumps(content, ensure_ascii=False) if isinstance(content, (dict, list)) else str(content)
+            if "category" in after:
+                category = after["category"]
+                if not isinstance(category, str):
+                    after["category"] = str(category)
 
         if action == "add":
             data = dict(after)
