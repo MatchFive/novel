@@ -118,18 +118,24 @@ def _format_entity(entity: dict, fields: list[str]) -> str:
 
 
 class ContextBuilder:
-    def __init__(self, db: AsyncSession, llm: LLMClient):
+    def __init__(
+        self,
+        db: AsyncSession,
+        llm: LLMClient,
+        entities: dict[str, list[dict]] | None = None,
+    ):
         self.db = db
         self.llm = llm
+        self._entities = entities
 
     async def build(
         self,
-        project_id: str,
         query: str,
         focus_entity_type: str | None = None,
+        project_id: str | None = None,
     ) -> str:
         keywords = _extract_keywords(query)
-        candidates = await self._fetch_entities(project_id, keywords)
+        candidates = await self._fetch_entities(keywords, project_id=project_id)
 
         if not any(candidates.values()):
             return ""
@@ -139,12 +145,18 @@ class ContextBuilder:
 
     async def _fetch_entities(
         self,
-        project_id: str,
         keywords: list[str],
+        project_id: str | None = None,
     ) -> dict[str, list[dict]]:
         candidates: dict[str, list[dict]] = {}
         for entity_type, config in _ENTITY_CONFIG.items():
-            entities = await config["repo"](self.db, project_id)
+            if self._entities is not None:
+                entities = self._entities.get(entity_type, [])
+            else:
+                if not project_id:
+                    entities = []
+                else:
+                    entities = await config["repo"](self.db, project_id)
             candidates[entity_type] = _coarse_filter(entities, keywords, _COARSE_TOP_N)
         return candidates
 

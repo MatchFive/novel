@@ -106,7 +106,10 @@ async def test_worker_uses_context_builder_when_project_id_present():
 
     assert "相关角色" in user_msg
     assert "刘修" in user_msg
-    MockBuilder.return_value.build.assert_awaited_once_with("p1", "完善刘修的设定", "character")
+    MockBuilder.assert_called_once()
+    _, kwargs = MockBuilder.call_args
+    assert kwargs.get("entities") is context
+    MockBuilder.return_value.build.assert_awaited_once_with("完善刘修的设定", "character")
 
 
 def test_parse_final_extracts_json_from_markdown_explanation():

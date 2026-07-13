@@ -10,11 +10,10 @@ class CharacterWorker(WorkerBase):
     worker_name = "character"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
-        project_id = context.get("project_id")
         related = ""
-        if project_id:
-            builder = ContextBuilder(self.db, self.llm)
-            related = await builder.build(project_id, goal, "character")
+        if context.get("project_id"):
+            builder = ContextBuilder(self.db, self.llm, entities=context)
+            related = await builder.build(goal, "character")
 
         chars = context.get("characters") or []
         chars_desc = "\n".join(
@@ -42,11 +41,10 @@ class WorldWorker(WorkerBase):
     worker_name = "world"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
-        project_id = context.get("project_id")
         related = ""
-        if project_id:
-            builder = ContextBuilder(self.db, self.llm)
-            related = await builder.build(project_id, goal, "world")
+        if context.get("project_id"):
+            builder = ContextBuilder(self.db, self.llm, entities=context)
+            related = await builder.build(goal, "world")
 
         system = (
             "你是世界观设定师。使用只读工具 read_world 了解现有设定，"
@@ -63,11 +61,10 @@ class OutlineWorker(WorkerBase):
     worker_name = "outline"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
-        project_id = context.get("project_id")
         related = ""
-        if project_id:
-            builder = ContextBuilder(self.db, self.llm)
-            related = await builder.build(project_id, goal, "outline")
+        if context.get("project_id"):
+            builder = ContextBuilder(self.db, self.llm, entities=context)
+            related = await builder.build(goal, "outline")
 
         system = (
             "你是大纲架构师。使用只读工具 read_outlines / read_outline / read_outline_prev_version "
@@ -85,11 +82,10 @@ class PlotWorker(WorkerBase):
     worker_name = "plot"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
-        project_id = context.get("project_id")
         related = ""
-        if project_id:
-            builder = ContextBuilder(self.db, self.llm)
-            related = await builder.build(project_id, goal, "plot")
+        if context.get("project_id"):
+            builder = ContextBuilder(self.db, self.llm, entities=context)
+            related = await builder.build(goal, "plot")
 
         system = (
             "你是剧情节点编排师。使用只读工具 read_plot_nodes / read_outlines 取数，"
@@ -106,11 +102,10 @@ class ForeshadowWorker(WorkerBase):
     worker_name = "foreshadow"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
-        project_id = context.get("project_id")
         related = ""
-        if project_id:
-            builder = ContextBuilder(self.db, self.llm)
-            related = await builder.build(project_id, goal, "foreshadow")
+        if context.get("project_id"):
+            builder = ContextBuilder(self.db, self.llm, entities=context)
+            related = await builder.build(goal, "foreshadow")
 
         system = (
             "你是伏笔设计师。使用只读工具 read_foreshadows / read_plot_nodes 取数，"
