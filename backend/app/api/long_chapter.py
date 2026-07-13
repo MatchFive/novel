@@ -14,13 +14,13 @@ from app.schemas.long import ChapterCreate, ChapterUpdate, ChapterReorder
 router = APIRouter(prefix="/chapters", tags=["long-chapter"])
 
 
-@router.get("/project/{project_id}")
+@router.get("/{project_id}")
 async def get_chapters(project_id: str, db: AsyncSession = Depends(get_db)):
     rows = await list_chapters(db, project_id)
     return sorted(rows, key=lambda r: r.get("order", 0))
 
 
-@router.get("/{chapter_id}")
+@router.get("/detail/{chapter_id}")
 async def get_chapter_detail(chapter_id: str, db: AsyncSession = Depends(get_db)):
     row = await get_chapter(db, chapter_id)
     if not row:
