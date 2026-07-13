@@ -110,26 +110,16 @@ def _assigned_plot_nodes(plot_nodes: list[dict], chapter_id: str | None) -> list
     return [p for p in plot_nodes if p.get("chapter_id") == chapter_id]
 
 
-def _ensure_changes(result: Any) -> list[dict]:
-    if isinstance(result, dict):
-        changes = result.get("changes")
-        if isinstance(changes, list):
-            return changes
-    return []
-
-
 def _result_to_response(result: Any, stage: str) -> dict:
     """将 LLM 解析结果统一转换为 {changes, stage, error?}。"""
-    changes = _ensure_changes(result)
-    if changes:
-        return {"changes": changes, "stage": stage}
-    if isinstance(result, dict) and result.get("raw"):
-        return {
-            "changes": [],
-            "stage": stage,
-            "error": f"LLM 输出解析失败: {str(result.get('raw'))[:200]}",
-        }
-    return {"changes": [], "stage": stage}
+    if isinstance(result, dict) and "changes" in result:
+        return {"changes": result["changes"], "stage": stage}
+    return {
+        "changes": [],
+        "stage": stage,
+        "error": "无法解析 worker 输出",
+        "raw": result,
+    }
 
 
 def _build_context_entities(context: dict) -> dict[str, list[dict]]:
@@ -149,6 +139,15 @@ def _user_prompt(goal: str, related: str = "") -> str:
         parts.append(f"【相关上下文】\n{related}")
     parts.append(f"【用户目标】\n{goal}")
     return "\n\n".join(parts)
+
+
+async def _generate_json(llm, messages: list[dict]) -> Any:
+    """直接调用 LLM 并解析 JSON 结果。"""
+    try:
+        return await llm.parse_llm_json(messages)
+    except Exception:
+        logger.exception("LLM JSON generation failed")
+        return None
 
 
 class BroadOutlineWorker(WorkerBase):
@@ -181,9 +180,14 @@ class BroadOutlineWorker(WorkerBase):
             "plot_nodes": context.get("plot") or [],
         }
         system = broad_outline_prompt(prompt_context)
-        result = await self._tool_loop(
-            system, _user_prompt(goal, related), history_context=history_context
-        )
+        user_prompt = _user_prompt(goal, related)
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_prompt},
+        ]
+        if history_context:
+            messages = history_context + messages
+        result = await _generate_json(self.llm, messages)
         return _result_to_response(result, "broad_outline")
 
 
@@ -217,9 +221,14 @@ class PlotNodesWorker(WorkerBase):
             "world": context.get("world") or [],
         }
         system = plot_nodes_prompt(prompt_context)
-        result = await self._tool_loop(
-            system, _user_prompt(goal, related), history_context=history_context
-        )
+        user_prompt = _user_prompt(goal, related)
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_prompt},
+        ]
+        if history_context:
+            messages = history_context + messages
+        result = await _generate_json(self.llm, messages)
         return _result_to_response(result, "plot_nodes")
 
 
@@ -251,9 +260,14 @@ class AssignmentWorker(WorkerBase):
             "existing_chapters": chapters,
         }
         system = assignment_prompt(prompt_context)
-        result = await self._tool_loop(
-            system, _user_prompt(goal, related), history_context=history_context
-        )
+        user_prompt = _user_prompt(goal, related)
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_prompt},
+        ]
+        if history_context:
+            messages = history_context + messages
+        result = await _generate_json(self.llm, messages)
         return _result_to_response(result, "assignment")
 
 
@@ -306,9 +320,14 @@ class ChapterOutlineWorker(WorkerBase):
             "active_foreshadows": _active_foreshadows(foreshadows),
         }
         system = chapter_outline_prompt(prompt_context)
-        result = await self._tool_loop(
-            system, _user_prompt(goal, related), history_context=history_context
-        )
+        user_prompt = _user_prompt(goal, related)
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_prompt},
+        ]
+        if history_context:
+            messages = history_context + messages
+        result = await _generate_json(self.llm, messages)
         return _result_to_response(result, "chapter_outline")
 
 
