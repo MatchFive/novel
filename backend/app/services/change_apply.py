@@ -96,7 +96,6 @@ async def confirm_session(db: AsyncSession, session_id: str, change_ids: list[st
     target_ids = set(change_ids) if change_ids else None
     applied = []
     errors = []
-    success_ids = set()
     remaining = []
     for ch in staged:
         ch_id = ch.get("id")
@@ -106,19 +105,6 @@ async def confirm_session(db: AsyncSession, session_id: str, change_ids: list[st
         try:
             r = await apply_change(db, project_id, ch)
             applied.append({**r, "change_id": ch_id})
-            success_ids.add(ch_id)
-        except AppError as e:
-            errors.append({"change_id": ch_id, "code": e.code, "message": e.message})
-            # apply_change 内部若发生数据库异常，当前 transaction 可能已回滚，
-            # 需要显式 rollback 才能继续后续会话状态写入。
-            try:
-                await db.rollback()
-            except Exception:
-                pass
-            remaining.append(ch)
-    # 记录到 long_change_records（仅成功项）
-    for ch in staged:
-        if ch.get("id") in success_ids:
             db.add(LongChangeRecord(
                 project_id=project_id,
                 entity_type=ch.get("entity_type"),
@@ -127,6 +113,14 @@ async def confirm_session(db: AsyncSession, session_id: str, change_ids: list[st
                 after=ch.get("after"),
                 status="applied",
             ))
+            await db.commit()
+        except AppError as e:
+            errors.append({"change_id": ch_id, "code": e.code, "message": e.message})
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            remaining.append(ch)
     sess.staged_changes = remaining
     await db.commit()
     return {"ok": len(errors) == 0, "applied": applied, "errors": errors}
