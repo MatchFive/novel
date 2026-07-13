@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { longApi } from "@/api/long";
 import { graphApi } from "@/api/graph";
@@ -162,24 +162,47 @@ function ChapterPanel({ pid }: { pid: string }) {
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
   const [itemsLoading, setItemsLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const detailReqIdRef = useRef<number>(0);
+
+  const showError = (e: unknown) => {
+    const msg = e instanceof Error ? e.message : "操作失败";
+    console.error(e);
+    setError(msg);
+  };
+
+  const clearError = () => setError(null);
 
   const loadItems = async () => {
     setItemsLoading(true);
+    clearError();
     try {
       const { data } = await longApi.chapters(pid);
       setItems(data || []);
+    } catch (e) {
+      showError(e);
     } finally {
       setItemsLoading(false);
     }
   };
 
   const loadDetail = async (id: string) => {
+    const reqId = ++detailReqIdRef.current;
     setDetailLoading(true);
+    clearError();
     try {
       const { data } = await longApi.getChapter(id);
-      setSelectedChapter(data);
+      if (reqId === detailReqIdRef.current) {
+        setSelectedChapter(data);
+      }
+    } catch (e) {
+      if (reqId === detailReqIdRef.current) {
+        showError(e);
+      }
     } finally {
-      setDetailLoading(false);
+      if (reqId === detailReqIdRef.current) {
+        setDetailLoading(false);
+      }
     }
   };
 
@@ -195,44 +218,67 @@ function ChapterPanel({ pid }: { pid: string }) {
     }
   }, [selectedId]);
 
-  const handleSelect = (id: string) => setSelectedId(id);
+  const handleSelect = (id: string) => {
+    clearError();
+    setSelectedId(id);
+  };
 
   const handleAdd = async (title: string) => {
-    const { data } = await longApi.addChapter({
-      project_id: pid,
-      title,
-      content: "",
-      order: items.length,
-    });
-    await loadItems();
-    setSelectedId(data.id);
+    clearError();
+    try {
+      const { data } = await longApi.addChapter({
+        project_id: pid,
+        title,
+        content: "",
+        order: items.length,
+      });
+      await loadItems();
+      setSelectedId(data.id);
+    } catch (e) {
+      showError(e);
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (!window.confirm("确定删除该章节吗？")) return;
-    await longApi.deleteChapter(id);
-    if (selectedId === id) setSelectedId(null);
-    await loadItems();
+    clearError();
+    try {
+      await longApi.deleteChapter(id);
+      if (selectedId === id) setSelectedId(null);
+      await loadItems();
+    } catch (e) {
+      showError(e);
+    }
   };
 
   const handleMove = async (id: string, direction: -1 | 1) => {
-    const index = items.findIndex((c) => c.id === id);
+    clearError();
+    const sortedItems = [...items].sort((a, b) => a.order - b.order);
+    const index = sortedItems.findIndex((c) => c.id === id);
     if (index === -1) return;
     const newIndex = index + direction;
-    if (newIndex < 0 || newIndex >= items.length) return;
-    const newItems = [...items];
-    const [moved] = newItems.splice(index, 1);
-    newItems.splice(newIndex, 0, moved);
-    const newIds = newItems.map((c) => c.id);
-    await longApi.reorderChapters(pid, newIds);
-    await loadItems();
+    if (newIndex < 0 || newIndex >= sortedItems.length) return;
+    const [moved] = sortedItems.splice(index, 1);
+    sortedItems.splice(newIndex, 0, moved);
+    const newIds = sortedItems.map((c) => c.id);
+    try {
+      await longApi.reorderChapters(pid, newIds);
+      await loadItems();
+    } catch (e) {
+      showError(e);
+    }
   };
 
   const handleSave = async (id: string, data: Partial<Chapter>) => {
-    await longApi.updateChapter(id, data);
-    await loadItems();
-    if (selectedId === id) {
-      await loadDetail(id);
+    clearError();
+    try {
+      await longApi.updateChapter(id, data);
+      await loadItems();
+      if (selectedId === id) {
+        await loadDetail(id);
+      }
+    } catch (e) {
+      showError(e);
     }
   };
 
@@ -255,6 +301,11 @@ function ChapterPanel({ pid }: { pid: string }) {
           )}
         </div>
         <div className="relative flex flex-1 flex-col border border-line bg-surface p-3">
+          {error && (
+            <div className="mb-3 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
           {detailLoading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface/80">
               <span className="text-sm text-muted">加载中…</span>
