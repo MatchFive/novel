@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.agents.harness.context_builder import ContextBuilder
 from app.agents.harness.worker_base import WorkerBase
 from app.core.llm_client import LLMClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,14 +10,32 @@ class CharacterWorker(WorkerBase):
     worker_name = "character"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
+        project_id = context.get("project_id")
+        related = ""
+        if project_id:
+            builder = ContextBuilder(self.db, self.llm)
+            related = await builder.build(project_id, goal, "character")
+
+        chars = context.get("characters") or []
+        chars_desc = "\n".join(
+            f"- {c.get('name')} (id={c.get('id')})"
+            for c in chars
+        ) or "暂无现有角色。"
+
         system = (
-            "你是角色设计师。利用只读工具 read_characters / read_character 了解现有角色，"
-            "然后基于用户目标设计或调整角色。最终以 JSON 返回建议变更："
+            "你是角色设计师。基于用户目标设计或调整角色，最终以 JSON 返回建议变更："
             '{"changes": [{"action":"add|update", "entity_id":null或id, '
-            '"fields": {"name":"", "traits":"", "ability":"", "status":"", "relations":[], "importance":0}}]}'
-            "若需调用工具，请输出 TOOL_CALL:{\"name\":\"read_characters\",\"arguments\":{\"project_id\":\"...\"}}"
+            '"fields": {"name":"", "traits":"", "ability":"", "status":"", "relations":[], "importance":0}}]}\n\n'
+            "重要规则：\n"
+            "1. 下面会提供「现有角色」列表。若用户目标中的角色 name 与现有角色 name 完全相同，"
+            "必须返回 action='update'，entity_id 必须填该现有角色的 id，fields 为合并后的完整新内容。\n"
+            "2. 只有 name 完全不存在于现有角色列表时，才返回 action='add'，entity_id=null。\n"
+            "3. 不要创建与现有角色同名的重复角色。\n"
+            "4. 参考【相关上下文】保持与现有设定一致。\n"
+            "若需调用工具进一步了解角色，请输出 TOOL_CALL:{\"name\":\"read_characters\",\"arguments\":{\"project_id\":\"...\"}}"
         )
-        return await self._tool_loop(system, goal, history_context=history_context)
+        user_prompt = f"【现有角色】\n{chars_desc}\n\n【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
+        return await self._tool_loop(system, user_prompt, history_context=history_context)
 
 
 class WorldWorker(WorkerBase):
