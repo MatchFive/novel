@@ -61,6 +61,17 @@ async def update_user_settings(payload: UserSettingUpdate, db: AsyncSession = De
 
 
 # ---------- 模型配置 ----------
+async def _ensure_level_unique(db: AsyncSession, level: str | None, exclude_id: str | None = None):
+    """保证同一 level 最多只有一条配置；把其他同 level 配置的 level 置为 None。"""
+    if not level:
+        return
+    res = await db.execute(select(ModelConfig).where(ModelConfig.level == level))  # noqa: E712
+    for m in res.scalars().all():
+        if exclude_id and m.id == exclude_id:
+            continue
+        m.level = None
+
+
 @router.get("/models")
 async def list_models(db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(ModelConfig))
@@ -73,6 +84,7 @@ async def create_model(payload: ModelConfigCreate, db: AsyncSession = Depends(ge
         res = await db.execute(select(ModelConfig).where(ModelConfig.is_default == True))  # noqa: E712
         for m in res.scalars().all():
             m.is_default = False
+    await _ensure_level_unique(db, payload.level)
     m = ModelConfig(**payload.model_dump())
     db.add(m)
     await db.commit()
@@ -91,6 +103,7 @@ async def update_model(model_id: str, payload: ModelConfigUpdate, db: AsyncSessi
         for other in res.scalars().all():
             if other.id != model_id:
                 other.is_default = False
+    await _ensure_level_unique(db, data.get("level"), exclude_id=model_id)
     for k, v in data.items():
         setattr(m, k, v)
     await db.commit()
