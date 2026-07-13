@@ -59,6 +59,8 @@ class ModelConfig(Base):
     base_url = Column(String(512), nullable=False)
     api_key = Column(String(512), default="")
     model = Column(String(128), nullable=False)
+    level = Column(String(32), nullable=True, index=True)
+    embedding_model = Column(String(128), nullable=True)
     is_default = Column(Boolean, default=False)
 
     def to_dict(self, hide_key: bool = True) -> dict:
@@ -67,6 +69,8 @@ class ModelConfig(Base):
             "name": self.name,
             "base_url": self.base_url,
             "model": self.model,
+            "level": self.level,
+            "embedding_model": self.embedding_model,
             "is_default": self.is_default,
             **({} if hide_key else {"api_key": self.api_key}),
         }
@@ -102,6 +106,7 @@ class AssistantSession(Base):
     title = Column(String(255), nullable=False, default="未命名对话")
     is_active = Column(Boolean, default=False, nullable=False)
     staged_changes = Column(JSON, default=list)
+    context = Column(JSON, default=dict)
     summaries = Column(JSON, default=list)
     message_count = Column(Integer, default=0, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
@@ -142,6 +147,7 @@ class LongOutline(Base):
     content = Column(Text, default="")
     version_chain = Column(CHAR(36), nullable=True)  # 上一版 id
     order = Column(Integer, default=0)
+    type = Column(String(32), default="broad")
 
 
 class LongCharacter(Base):
@@ -182,9 +188,11 @@ class LongPlotNode(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
+    chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String(255), default="")
     summary = Column(Text, default="")
     timeline_pos = Column(String(64), default="")
+    order = Column(Integer, default=0)
 
 
 class LongChapter(Base):
@@ -194,6 +202,8 @@ class LongChapter(Base):
     project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
     title = Column(String(255), default="")
     content = Column(Text, default="")
+    detailed_outline = Column(Text, default="")
+    status = Column(String(32), default="draft")
     order = Column(Integer, default=0)
     constraints = Column(JSON, default=list)
 

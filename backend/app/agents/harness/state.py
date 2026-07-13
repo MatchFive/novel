@@ -15,6 +15,7 @@ class ChangeRecord(BaseModel):
     before: Optional[dict] = None
     after: Optional[dict] = None
     requires_confirmation: bool = True
+    stage: str = ""
 
 
 class HarnessState(BaseModel):

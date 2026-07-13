@@ -80,6 +80,8 @@ class ChapterCreate(BaseModel):
     project_id: str
     title: str = ""
     content: str = ""
+    detailed_outline: str = ""
+    status: str = "draft"
     order: int = 0
     constraints: list = Field(default_factory=list)
 
@@ -87,5 +89,11 @@ class ChapterCreate(BaseModel):
 class ChapterUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
+    detailed_outline: Optional[str] = None
+    status: Optional[str] = None
     order: Optional[int] = None
     constraints: Optional[list] = None
+
+
+class ChapterReorder(BaseModel):
+    chapter_ids: list[str]

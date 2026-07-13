@@ -8,6 +8,8 @@ class ModelConfigCreate(BaseModel):
     base_url: str
     api_key: str = ""
     model: str
+    level: Optional[str] = None
+    embedding_model: Optional[str] = None
     is_default: bool = False
 
 
@@ -16,6 +18,8 @@ class ModelConfigUpdate(BaseModel):
     base_url: Optional[str] = None
     api_key: Optional[str] = None
     model: Optional[str] = None
+    level: Optional[str] = None
+    embedding_model: Optional[str] = None
     is_default: Optional[bool] = None
 
 
