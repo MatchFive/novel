@@ -39,6 +39,7 @@ def make_change(
     after: dict,
     entity_id: Optional[str] = None,
     before: Optional[dict] = None,
+    stage: Optional[str] = None,
 ) -> ChangeRecord:
     import uuid
     return ChangeRecord(
@@ -49,4 +50,5 @@ def make_change(
         entity_id=entity_id,
         before=before,
         after=after,
+        stage=stage or "",
     )

@@ -9,7 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, NotFoundError, ValidationError
-from app.core.llm_factory import get_default_llm_client
+from app.core.llm_factory import get_llm_client
 from app.database import get_db
 from app.models import AssistantSession, AssistantMessage, Project, UserSetting
 from app.agents.harness.history import (
@@ -22,6 +22,7 @@ from app.agents.harness.history import (
 from app.agents.harness.nodes.supervisor import run_supervisor
 from app.agents.harness.workers import (
     CharacterWorker, WorldWorker, OutlineWorker, PlotWorker, ForeshadowWorker,
+    BroadOutlineWorker, PlotNodesWorker, AssignmentWorker, ChapterOutlineWorker, ChapterTextWorker,
 )
 from app.agents.harness.worker_base import run_worker
 from app.agents.harness.nodes.aggregator import aggregate
@@ -37,6 +38,20 @@ _WORKERS = {
     "outline": OutlineWorker,
     "plot": PlotWorker,
     "foreshadow": ForeshadowWorker,
+    "broad_outline": BroadOutlineWorker,
+    "plot_nodes": PlotNodesWorker,
+    "assignment": AssignmentWorker,
+    "chapter_outline": ChapterOutlineWorker,
+    "chapter_text": ChapterTextWorker,
+}
+
+
+_WORKER_LEVEL = {
+    "broad_outline": "high",
+    "chapter_text": "high",
+    "plot_nodes": "medium",
+    "assignment": "medium",
+    "chapter_outline": "medium",
 }
 
 
@@ -107,7 +122,6 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             status_code=500,
         )
 
-    llm = await get_default_llm_client(db)
     recursive_limit = await _recursive_limit(db)
 
     hist_res = await db.execute(
@@ -131,13 +145,20 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     else:
         # 1. 前置取数
         from app import repositories as repo
+        project = await db.get(Project, effective_project_id)
+        project_summary = f"{project.title}\n{project.description}".strip() if project else ""
         context = {
             "project_id": effective_project_id,
+            "project": project.to_dict() if project else None,
+            "project_summary": project_summary,
             "outlines": await repo.list_outlines(db, effective_project_id),
             "characters": await repo.list_characters(db, effective_project_id),
             "foreshadows": await repo.list_foreshadows(db, effective_project_id),
             "world": await repo.list_world(db, effective_project_id),
             "plot": await repo.list_plot(db, effective_project_id),
+            "chapters": await repo.list_chapters(db, effective_project_id),
+            "entity_id": context_payload.get("entity_id"),
+            "entity_type": context_payload.get("entity_type"),
         }
 
         context_note = ""
@@ -145,37 +166,55 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             context_note = f"\n\n当前会话上下文：{json.dumps(sess.context, ensure_ascii=False)}"
 
         # 2. Supervisor 拆分（使用不含当前用户输入的 messages，当前输入单独传入）
-        supervisor_msgs = build_messages(
+        supervisor_prompt = (
             "你是小说创作助手的调度器。根据用户指令与项目现有数据，判断需要派发哪些专精 Worker 来处理。"
             "可选 Worker：character（角色设计/调整）、world（世界观设定）、outline（大纲生成/调整）、"
-            "plot（剧情节点编排）、foreshadow（伏笔埋设/回收）。请返回 JSON："
+            "plot（剧情节点编排）、foreshadow（伏笔埋设/回收）、"
+            "broad_outline（项目级总纲生成/更新）、plot_nodes（从总纲抽取关键剧情节点）、"
+            "assignment（把剧情节点分配到已有/新建章节）、chapter_outline（生成单个章节细纲）、"
+            "chapter_text（生成单个章节正文）。请返回 JSON："
             '{"intent": "一句话意图", "tasks": [{"worker": "character", "goal": "..."}, ...]}。\n\n'
             "Worker 选择规则（严格按内容归类，禁止把世界观/规则类指令派给 outline）：\n"
             "- world（世界观）：只要用户在新增/修改世界观、设定、力量体系、修炼境界、社会规则、"
             "历史背景、地理环境、种族、宗教、神话、盟约/契约/法则/禁令，或出现'世界观''设定''规则''体系'等词，"
             "就必须派给 world。此类指令绝不能派给 outline。\n"
             "- character：用户明确提到角色、人物、主角、配角、性格、能力、关系、命运。\n"
-            "- outline：仅当用户明确提到大纲、章节结构、起承转合、主线/支线安排时才派给 outline。\n"
-            "- plot：用户提到具体剧情、事件、桥段、时间线节点。\n"
+            "- outline：仅当用户明确提到传统大纲、章节结构、起承转合、主线/支线安排时才派给 outline。\n"
+            "- broad_outline：用户说“生成/重新生成总纲/项目大纲/整体大纲”时派给 broad_outline。\n"
+            "- plot_nodes：用户说“生成剧情节点/桥段/关键事件”时派给 plot_nodes。\n"
+            "- assignment：用户说“分配章节/把剧情节点分配到章节/把桥段分配到章节”时派给 assignment。\n"
+            "- chapter_outline：用户说“生成细纲/章节大纲/写第 X 章细纲”时派给 chapter_outline。\n"
+            "- chapter_text：用户说“生成正文/写第 X 章/写正文”时派给 chapter_text。\n"
+            "- plot：用户提到具体剧情、事件、桥段、时间线节点但不涉及分配时。\n"
             "- foreshadow：用户提到伏笔、悬念、回收/呼应。\n\n"
             "若指令涉及当前上下文中的 entity_type/entity_id，应优先派给对应 worker（如果 project_id 可用）。"
             f"{context_note}\n\n"
             "示例（只输出 JSON，不要解释）：\n"
             '用户：新增世界观设定：这是一个修仙世界，境界分为炼气、筑基。\n'
             '输出：{"intent": "新增修仙世界观", "tasks": [{"worker": "world", "goal": "新增修仙世界观设定，境界划分为炼气、筑基"}]}\n'
-            '用户：写一下前三章大纲。\n'
-            '输出：{"intent": "生成前三章大纲", "tasks": [{"worker": "outline", "goal": "写前三章大纲"}]}\n'
-            '用户：众神盟约禁止对凡人直接出手，违反会导致世界重演。\n'
-            '输出：{"intent": "新增众神盟约世界观规则", "tasks": [{"worker": "world", "goal": "新增众神盟约世界观规则：禁止对凡人直接出手及违反后果"}]}\n'
+            '用户：生成前5章总纲。\n'
+            '输出：{"intent": "生成前5章总纲", "tasks": [{"worker": "broad_outline", "goal": "生成前5章总纲"}]}\n'
+            '用户：生成剧情节点。\n'
+            '输出：{"intent": "生成剧情节点", "tasks": [{"worker": "plot_nodes", "goal": "生成剧情节点"}]}\n'
+            '用户：把剧情节点分配到章节。\n'
+            '输出：{"intent": "分配剧情节点到章节", "tasks": [{"worker": "assignment", "goal": "把剧情节点分配到章节"}]}\n'
+            '用户：生成第1章细纲。\n'
+            '输出：{"intent": "生成第1章细纲", "tasks": [{"worker": "chapter_outline", "goal": "生成第1章细纲"}]}\n'
+            '用户：写第1章正文。\n'
+            '输出：{"intent": "生成第1章正文", "tasks": [{"worker": "chapter_text", "goal": "生成第1章正文"}]}\n'
             '用户：主角性格应该更沉稳。\n'
             '输出：{"intent": "调整主角性格", "tasks": [{"worker": "character", "goal": "调整主角性格，使其更沉稳"}]}\n\n'
-            "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。",
+            "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。"
+        )
+        supervisor_msgs = build_messages(
+            supervisor_prompt,
             sess,
             historical_messages[:-1],
             user_input,
             settings_obj,
         )
-        plan = await run_supervisor(llm, supervisor_msgs)
+        supervisor_llm = await get_llm_client(db, level="medium")
+        plan = await run_supervisor(supervisor_llm, supervisor_msgs)
     logger.warning("Assistant supervisor plan: %s", plan)
 
     # 3. 派发 Worker（仅通过只读工具取数，产出结构化结果，不落库）
@@ -186,8 +225,10 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         if not wcls:
             continue
         goal = task.get("goal", user_input)
+        level = _WORKER_LEVEL.get(wname, "medium")
+        worker_llm = await get_llm_client(db, level=level)
         result = await run_worker(
-            wcls, db, llm, recursive_limit, goal, context,
+            wcls, db, worker_llm, recursive_limit, goal, context,
             history_context=history_context,
         )
         result["worker"] = wname
@@ -205,13 +246,16 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     # 6. responder 摘要
+    responder_llm = await get_llm_client(db, level="low")
     if is_global:
         summary = await respond(
-            llm, records, user_input=user_input, history_context=history_context,
+            responder_llm, records, user_input=user_input, history_context=history_context,
             system_prompt=GLOBAL_RESPONDER_PROMPT,
         )
     else:
-        summary = await respond(llm, records, user_input=user_input, history_context=history_context)
+        summary = await respond(
+            responder_llm, records, user_input=user_input, history_context=history_context
+        )
 
     records_data = [r.model_dump() for r in records]
     assistant_msg_id = None
@@ -246,7 +290,8 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         if should_summarize(sess, settings_obj):
             threshold = settings_obj.assistant_summary_threshold or 20
             recent = reload_messages[-(threshold * 2):]
-            summary_text = await summarize_messages(recent, settings_obj, llm)
+            summary_llm = await get_llm_client(db, level="low")
+            summary_text = await summarize_messages(recent, settings_obj, summary_llm)
             append_summary(sess, recent, summary_text, settings_obj)
             await db.commit()
             await db.refresh(sess)
