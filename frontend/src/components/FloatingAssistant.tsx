@@ -5,7 +5,6 @@ import { Button, Textarea } from "@/components/ui";
 import AssistantChat from "./AssistantChat";
 
 export default function FloatingAssistant() {
-  const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState("");
   const [projectId, setProjectId] = useState<string | null>(null);
   const location = useLocation();
@@ -15,11 +14,14 @@ export default function FloatingAssistant() {
     pendingRecords,
     busy,
     error,
+    assistantOpen,
+    setAssistantOpen,
     loadHistory,
     loadSessions,
     sendMessage,
     confirm,
     reject,
+    stageChange,
     reset,
   } = useAssistantSession();
 
@@ -40,9 +42,22 @@ export default function FloatingAssistant() {
     const text = input.trim();
     if (!text || busy) return;
 
+    const isLongProject = /\/project\/long\/[^/]+/.test(location.pathname);
+    const searchParams = new URLSearchParams(location.search);
+    const tab = searchParams.get("tab") || undefined;
+    const entityType = searchParams.get("entity_type") || undefined;
+    const entityId = searchParams.get("entity_id") || undefined;
+
     const context: Record<string, any> = { page_path: location.pathname };
     if (projectId) {
       context.project_id = projectId;
+    }
+    if (isLongProject && tab) {
+      context.tab = tab;
+      if (tab === "chapter" && entityType && entityId) {
+        context.entity_type = entityType;
+        context.entity_id = entityId;
+      }
     }
 
     try {
@@ -53,11 +68,11 @@ export default function FloatingAssistant() {
     }
   };
 
-  if (!isOpen) {
+  if (!assistantOpen) {
     return (
       <button
-        onClick={() => setIsOpen(true)}
-        className="fixed bottom-4 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-paper shadow-lg transition-colors hover:bg-accent-strong"
+        onClick={() => setAssistantOpen(true)}
+        className="fixed bottom-4 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-none bg-accent text-paper shadow-lg transition-colors hover:bg-accent-strong"
         aria-label="打开创作助手"
       >
         <span className="text-sm font-semibold">AI</span>
@@ -66,18 +81,18 @@ export default function FloatingAssistant() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex h-[560px] w-[400px] flex-col rounded-lg border border-line bg-paper shadow-xl">
-      <div className="flex items-center justify-between rounded-t-lg border-b border-line bg-surface px-4 py-3">
+    <div className="fixed bottom-4 right-4 z-50 flex h-[560px] w-[400px] flex-col rounded-none border border-line bg-paper shadow-xl">
+      <div className="flex items-center justify-between rounded-none border-b border-line bg-surface px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-ink">创作助手</span>
           {!projectId && (
-            <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] text-accent-strong">
+            <span className="rounded-none bg-accent-soft px-2 py-0.5 text-[10px] text-accent-strong">
               通用
             </span>
           )}
         </div>
         <button
-          onClick={() => setIsOpen(false)}
+          onClick={() => setAssistantOpen(false)}
           className="text-muted transition-colors hover:text-ink"
           aria-label="收起创作助手"
         >
@@ -93,10 +108,12 @@ export default function FloatingAssistant() {
           error={error}
           onConfirm={confirm}
           onReject={reject}
+          onSend={(text) => sendMessage(projectId, text)}
+          onStageChange={stageChange}
         />
       </div>
 
-      <div className="shrink-0 rounded-b-lg border-t border-line bg-surface p-3">
+      <div className="shrink-0 rounded-none border-t border-line bg-surface p-3">
         <div className="flex items-end gap-2">
           <Textarea
             placeholder={

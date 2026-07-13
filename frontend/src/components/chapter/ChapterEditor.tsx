@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Textarea, Card, Empty } from "@/components/ui";
+import { useAssistantSession } from "@/stores/useAssistantSession";
 import type { Chapter } from "@/types";
 
 interface ChapterEditorProps {
@@ -10,6 +11,7 @@ interface ChapterEditorProps {
 export function ChapterEditor({ chapter, onSave }: ChapterEditorProps) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const { openAssistant, sendMessage } = useAssistantSession();
 
   useEffect(() => {
     if (chapter) {
@@ -37,6 +39,17 @@ export function ChapterEditor({ chapter, onSave }: ChapterEditorProps) {
     }
   };
 
+  const handleGenerate = (type: "outline" | "text") => {
+    const chapterName = chapter.title || "当前";
+    const text =
+      type === "outline"
+        ? `生成第 ${chapterName} 章细纲`
+        : `生成第 ${chapterName} 章正文`;
+    const context = { entity_type: "chapter", entity_id: chapter.id };
+    openAssistant();
+    sendMessage(chapter.project_id, text, context);
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="mb-3 flex items-center gap-3">
@@ -48,6 +61,12 @@ export function ChapterEditor({ chapter, onSave }: ChapterEditorProps) {
         />
         <Button variant="primary" onClick={handleSave}>
           保存
+        </Button>
+        <Button variant="ghost" onClick={() => handleGenerate("outline")}>
+          生成细纲
+        </Button>
+        <Button variant="ghost" onClick={() => handleGenerate("text")}>
+          生成正文
         </Button>
       </div>
 

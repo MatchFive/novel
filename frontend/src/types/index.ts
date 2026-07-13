@@ -46,6 +46,7 @@ export interface ChangeRecord {
   before: any;
   after: any;
   requires_confirmation: boolean;
+  stage?: string;
 }
 
 export interface Chapter {

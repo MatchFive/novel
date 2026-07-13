@@ -9,6 +9,7 @@ interface AssistantSessionState {
   busy: boolean;
   pendingRecords: ChangeRecord[];
   error: string | null;
+  assistantOpen: boolean;
   reset: () => void;
   loadHistory: (pid: string | null) => Promise<void>;
   loadSessions: (pid: string | null) => Promise<void>;
@@ -18,6 +19,8 @@ interface AssistantSessionState {
   stageChange: (record: ChangeRecord) => Promise<void>;
   confirm: (changeIds?: string[]) => Promise<void>;
   reject: (changeIds?: string[]) => Promise<void>;
+  setAssistantOpen: (open: boolean) => void;
+  openAssistant: () => void;
 }
 
 export const useAssistantSession = create<AssistantSessionState>((set, get) => ({
@@ -27,9 +30,10 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
   busy: false,
   pendingRecords: [],
   error: null,
+  assistantOpen: false,
 
   reset: () => {
-    set({ sessionId: null, sessions: [], messages: [], pendingRecords: [], error: null });
+    set({ sessionId: null, sessions: [], messages: [], pendingRecords: [], error: null, assistantOpen: false });
   },
 
   loadHistory: async (pid: string | null) => {
@@ -91,7 +95,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
   },
 
   sendMessage: async (pid: string | null, text: string, context?: Record<string, any>) => {
-    set({ busy: true, error: null });
+    set({ busy: true, error: null, assistantOpen: true });
     const userMsg: AssistantMessage = {
       id: `local-${Date.now()}`,
       role: "user",
@@ -252,4 +256,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
       set({ busy: false });
     }
   },
+
+  setAssistantOpen: (open: boolean) => set({ assistantOpen: open }),
+  openAssistant: () => set({ assistantOpen: true }),
 }));
