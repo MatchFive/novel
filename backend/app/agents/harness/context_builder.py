@@ -61,15 +61,23 @@ _SELECT_TOP_N = 5
 def _extract_keywords(text: str) -> list[str]:
     if not text:
         return []
-    # 英文/数字单独成词；连续中文字符合并成一个词
+    # 英文/数字单独成词；连续中文字符生成 1-3 gram
     tokens = re.findall(r"[a-zA-Z0-9]+|[一-鿿]+", text)
     result = []
     for t in tokens:
         t = t.strip().lower()
-        if len(t) <= 1 or t in _STOP_WORDS:
+        if re.match(r"^[a-zA-Z0-9]+$", t):
+            if len(t) > 1 and t not in _STOP_WORDS:
+                result.append(t)
             continue
-        result.append(t)
-    return result
+        # 中文：生成 1-gram、2-gram、3-gram，过滤停用字
+        chars = [c for c in t if c not in _STOP_WORDS]
+        for n in (2, 3, 1):
+            for i in range(len(chars) - n + 1):
+                gram = "".join(chars[i : i + n])
+                if gram and gram not in _STOP_WORDS:
+                    result.append(gram)
+    return list(dict.fromkeys(result))
 
 
 def _score_entity(entity: dict, keywords: list[str]) -> int:
