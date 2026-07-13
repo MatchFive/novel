@@ -59,7 +59,7 @@ export default function FloatingAssistant() {
     return (
       <button
         onClick={() => setAssistantOpen(true)}
-        className="fixed bottom-4 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-none bg-accent text-paper shadow-lg transition-colors hover:bg-accent-strong"
+        className="fixed bottom-4 right-4 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-accent text-paper shadow-lg transition-colors hover:bg-accent-strong"
         aria-label="打开创作助手"
       >
         <span className="text-sm font-semibold">AI</span>
@@ -68,12 +68,12 @@ export default function FloatingAssistant() {
   }
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex h-[560px] w-[400px] flex-col rounded-none border border-line bg-paper shadow-xl">
-      <div className="flex items-center justify-between rounded-none border-b border-line bg-surface px-4 py-3">
+    <div className="fixed bottom-4 right-4 z-50 flex h-[560px] w-[400px] flex-col rounded-lg border border-line bg-paper shadow-xl">
+      <div className="flex items-center justify-between rounded-t-lg border-b border-line bg-surface px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-ink">创作助手</span>
           {!projectId && (
-            <span className="rounded-none bg-accent-soft px-2 py-0.5 text-[10px] text-accent-strong">
+            <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] text-accent-strong">
               通用
             </span>
           )}
@@ -100,7 +100,7 @@ export default function FloatingAssistant() {
         />
       </div>
 
-      <div className="shrink-0 rounded-none border-t border-line bg-surface p-3">
+      <div className="shrink-0 rounded-b-lg border-t border-line bg-surface p-3">
         <div className="flex items-end gap-2">
           <Textarea
             placeholder={

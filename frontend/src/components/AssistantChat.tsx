@@ -189,6 +189,7 @@ export default function AssistantChat({
                 key={r.id}
                 record={r}
                 selected={selectedIds.has(r.id)}
+                busy={busy}
                 onToggle={() => toggle(r.id)}
                 onConfirm={() => onConfirm([r.id])}
                 onReject={() => onReject([r.id])}

@@ -11,7 +11,6 @@ interface ChapterEditorProps {
 export function ChapterEditor({ chapter, onSave }: ChapterEditorProps) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const { openAssistant, sendMessage } = useAssistantSession();
 
   useEffect(() => {
     if (chapter) {
@@ -46,8 +45,8 @@ export function ChapterEditor({ chapter, onSave }: ChapterEditorProps) {
         ? `生成第 ${chapterName} 章细纲`
         : `生成第 ${chapterName} 章正文`;
     const context = { entity_type: "chapter", entity_id: chapter.id };
-    openAssistant();
-    sendMessage(chapter.project_id, text, context);
+    useAssistantSession.getState().openAssistant();
+    useAssistantSession.getState().sendMessage(chapter.project_id, text, context);
   };
 
   return (

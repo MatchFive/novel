@@ -45,6 +45,7 @@ function diffFields(before: any, after: any): { key: string; before: string; aft
 interface ChangeRecordCardProps {
   record: ChangeRecord;
   selected?: boolean;
+  busy?: boolean;
   onToggle?: () => void;
   onConfirm?: () => void;
   onReject?: () => void;
@@ -55,6 +56,7 @@ interface ChangeRecordCardProps {
 export default function ChangeRecordCard({
   record,
   selected,
+  busy,
   onToggle,
   onConfirm,
   onReject,
@@ -119,10 +121,10 @@ export default function ChangeRecordCard({
             </Button>
           )}
           {onConfirm && (
-            <Button variant="subtle" className="px-2 py-0.5 text-xs" onClick={onConfirm}>接受</Button>
+            <Button variant="subtle" className="px-2 py-0.5 text-xs" disabled={busy} onClick={onConfirm}>接受</Button>
           )}
           {onReject && (
-            <Button variant="subtle" className="px-2 py-0.5 text-xs text-red-700 hover:text-red-800" onClick={onReject}>拒绝</Button>
+            <Button variant="subtle" className="px-2 py-0.5 text-xs" disabled={busy} onClick={onReject}>拒绝</Button>
           )}
         </div>
       </div>
