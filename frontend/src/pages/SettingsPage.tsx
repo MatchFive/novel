@@ -3,7 +3,15 @@ import { settingsApi } from "@/api/settings";
 import type { ModelConfig, UserSettings } from "@/types";
 import { Button, Input, Card, Tag } from "@/components/ui";
 
-const EMPTY_MODEL = { name: "", base_url: "", api_key: "", model: "", is_default: false };
+const EMPTY_MODEL = { name: "", base_url: "", api_key: "", model: "", is_default: false, level: "", embedding_model: "" };
+
+const LEVEL_OPTIONS = [
+  { value: "", label: "通用" },
+  { value: "low", label: "low" },
+  { value: "medium", label: "medium" },
+  { value: "high", label: "high" },
+  { value: "embedding", label: "embedding" },
+];
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<UserSettings | null>(null);
@@ -46,7 +54,15 @@ export default function SettingsPage() {
 
   const startEdit = (m: ModelConfig) => {
     setEditingId(m.id);
-    setEditForm({ name: m.name, base_url: m.base_url, model: m.model, api_key: "", is_default: m.is_default });
+    setEditForm({
+      name: m.name,
+      base_url: m.base_url,
+      model: m.model,
+      api_key: "",
+      is_default: m.is_default,
+      level: m.level || "",
+      embedding_model: m.embedding_model || "",
+    });
   };
 
   const saveEdit = async (id: string) => {
@@ -73,6 +89,16 @@ export default function SettingsPage() {
     { key: "assistant_max_summaries", label: "最大保留摘要数", min: 0, max: 20 },
     { key: "assistant_summary_max_length", label: "单条摘要最大长度（字符）", min: 100, max: 4000 },
   ];
+
+  const hasDefault = models.some((m) => m.is_default);
+  const configuredLevels = new Set(models.map((m) => m.level).filter(Boolean));
+  const missingLevels = hasDefault ? [] : ["low", "medium", "high"].filter((l) => !configuredLevels.has(l));
+  const hasEmbeddingSource = models.some(
+    (m) => m.level === "embedding" || (m.embedding_model && m.embedding_model.trim() !== "")
+  );
+
+  const selectClass =
+    "w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink outline-none transition focus:border-accent focus:ring-1 focus:ring-accent/30";
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
@@ -127,6 +153,17 @@ export default function SettingsPage() {
       <Card className="mt-6">
         <div className="border-b border-line px-4 py-3 font-serif text-sm font-medium text-ink">模型配置</div>
         <div className="space-y-3 p-4">
+          {missingLevels.length > 0 && (
+            <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+              重要度 [{missingLevels.join(", ")}] 未配置模型；若该 level 的任务未命中专用配置，将回退到 .env 默认。建议添加全局默认模型。
+            </div>
+          )}
+          {!hasEmbeddingSource && (
+            <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+              未指定 embedding 模型。
+            </div>
+          )}
+
           {models.length === 0 && <div className="text-sm text-muted">暂无模型配置，点击下方预设或手动添加。</div>}
           {models.map((m) => (
             <Card key={m.id} className="p-3 text-sm">
@@ -137,6 +174,20 @@ export default function SettingsPage() {
                     <Input placeholder="model" value={editForm.model} onChange={(e) => setEditForm({ ...editForm, model: e.target.value })} />
                     <Input placeholder="base_url" value={editForm.base_url} onChange={(e) => setEditForm({ ...editForm, base_url: e.target.value })} />
                     <Input placeholder="api_key（留空则保持原值）" type="password" value={editForm.api_key} onChange={(e) => setEditForm({ ...editForm, api_key: e.target.value })} />
+                    <select
+                      className={selectClass}
+                      value={editForm.level}
+                      onChange={(e) => setEditForm({ ...editForm, level: e.target.value })}
+                    >
+                      {LEVEL_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                    <Input
+                      placeholder="embedding_model"
+                      value={editForm.embedding_model}
+                      onChange={(e) => setEditForm({ ...editForm, embedding_model: e.target.value })}
+                    />
                   </div>
                   <div className="flex gap-2">
                     <Button variant="primary" onClick={() => saveEdit(m.id)}>保存</Button>
@@ -149,6 +200,8 @@ export default function SettingsPage() {
                     <span className="font-medium text-ink">{m.name}</span>
                     <span className="ml-2 text-muted">{m.model}</span>
                     {m.is_default && <Tag className="ml-2">默认</Tag>}
+                    {m.level && <Tag className="ml-2">{m.level}</Tag>}
+                    {m.embedding_model && <span className="ml-2 text-xs text-muted">embedding: {m.embedding_model}</span>}
                     <div className="text-xs text-muted">{m.base_url}</div>
                   </div>
                   <div className="flex gap-2">
@@ -168,6 +221,20 @@ export default function SettingsPage() {
               <Input placeholder="model" value={newModel.model} onChange={(e) => setNewModel({ ...newModel, model: e.target.value })} />
               <Input placeholder="base_url" value={newModel.base_url} onChange={(e) => setNewModel({ ...newModel, base_url: e.target.value })} />
               <Input placeholder="api_key" type="password" value={newModel.api_key} onChange={(e) => setNewModel({ ...newModel, api_key: e.target.value })} />
+              <select
+                className={selectClass}
+                value={newModel.level}
+                onChange={(e) => setNewModel({ ...newModel, level: e.target.value })}
+              >
+                {LEVEL_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <Input
+                placeholder="embedding_model，例如 text-embedding-3-small"
+                value={newModel.embedding_model}
+                onChange={(e) => setNewModel({ ...newModel, embedding_model: e.target.value })}
+              />
             </div>
             <div className="mt-2 flex items-center gap-2">
               <Button variant="primary" onClick={addModel}>+ 新增模型</Button>

@@ -13,6 +13,8 @@ export interface ModelConfig {
   base_url: string;
   model: string;
   is_default: boolean;
+  level?: string;
+  embedding_model?: string;
 }
 
 export interface UserSettings {
