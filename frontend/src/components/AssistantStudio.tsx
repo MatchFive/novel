@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAssistantSession } from "@/stores/useAssistantSession";
-import { Button, Input } from "@/components/ui";
+import { Button, Textarea } from "@/components/ui";
 import AssistantChat from "./AssistantChat";
 import ContextPanel from "./ContextPanel";
 import ContextEntityEditor from "./ContextEntityEditor";
@@ -84,8 +84,8 @@ export default function AssistantStudio({ pid }: { pid: string }) {
         />
 
         <div className="shrink-0 border-t border-line bg-surface p-4">
-          <div className="flex gap-2">
-            <Input
+          <div className="flex items-end gap-2">
+            <Textarea
               placeholder="描述创作意图，Enter 发送，Shift+Enter 换行"
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -96,6 +96,8 @@ export default function AssistantStudio({ pid }: { pid: string }) {
                 }
               }}
               disabled={busy}
+              rows={3}
+              className="resize-none"
             />
             <Button variant="primary" onClick={handleSend} disabled={busy || !input.trim()}>
               发送
