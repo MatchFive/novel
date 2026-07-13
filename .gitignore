@@ -6,3 +6,6 @@ data/
 __pycache__/
 *.pyc
 frontend/tsconfig.tsbuildinfo
+/dist-exe/
+/build-exe/
+NovelStudio.spec
