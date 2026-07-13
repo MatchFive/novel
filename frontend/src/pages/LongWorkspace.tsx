@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { longApi } from "@/api/long";
 import { graphApi } from "@/api/graph";
-import AssistantStudio from "@/components/AssistantStudio";
 import { ChapterList } from "@/components/chapter/ChapterList";
 import { ChapterEditor } from "@/components/chapter/ChapterEditor";
 import { Button, Input, Textarea, Card, SectionTitle } from "@/components/ui";
@@ -19,7 +18,7 @@ export default function LongWorkspace() {
         <Button variant="subtle" className="mb-4 w-full justify-start" onClick={() => nav("/")}>← 返回</Button>
         {[
           ["outline", "大纲树"], ["character", "角色"], ["foreshadow", "伏笔"],
-          ["world", "世界观"], ["plot", "剧情节点"], ["chapter", "章节"], ["graph", "图谱"], ["assistant", "创作助手"],
+          ["world", "世界观"], ["plot", "剧情节点"], ["chapter", "章节"], ["graph", "图谱"],
         ].map(([k, label]) => (
           <button
             key={k}
@@ -49,7 +48,6 @@ export default function LongWorkspace() {
         ]} />}
         {tab === "chapter" && <ChapterPanel pid={id!} />}
         {tab === "graph" && <GraphPanel pid={id!} />}
-        {tab === "assistant" && <AssistantStudio pid={id!} />}
       </div>
     </div>
   );

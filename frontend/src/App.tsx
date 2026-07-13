@@ -4,6 +4,7 @@ import HomePage from "./pages/HomePage";
 import SettingsPage from "./pages/SettingsPage";
 import LongWorkspace from "./pages/LongWorkspace";
 import ShortStudio from "./pages/ShortStudio";
+import FloatingAssistant from "./components/FloatingAssistant";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/project/short/:id" element={<ShortStudio />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <FloatingAssistant />
     </AppShell>
   );
 }

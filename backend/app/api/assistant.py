@@ -1,6 +1,7 @@
 """Agent 助手接口：chat（分析→派发→变更）、confirm（应用）、reject、undo。"""
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends
@@ -24,7 +25,7 @@ from app.agents.harness.workers import (
 )
 from app.agents.harness.worker_base import run_worker
 from app.agents.harness.nodes.aggregator import aggregate
-from app.agents.harness.nodes.responder import respond
+from app.agents.harness.nodes.responder import respond, GLOBAL_RESPONDER_PROMPT
 from app.services.change_apply import _ENTITY_REPO, confirm_session, reject_session
 
 logger = logging.getLogger(__name__)
@@ -70,20 +71,30 @@ async def _recursive_limit(db) -> int:
 async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     project_id = body.get("project_id")
     user_input = body.get("message", "")
-    if not project_id or not user_input:
-        raise ValidationError("project_id 与 message 必填")
+    context_payload = body.get("context") or {}
 
-    proj = await db.get(Project, project_id)
-    if not proj:
-        raise NotFoundError("项目不存在")
+    if not user_input:
+        raise ValidationError("message 必填")
 
-    sess = await _get_active_session(db, project_id)
+    # Resolve project_id: explicit body value takes precedence, then context.project_id
+    effective_project_id = project_id or context_payload.get("project_id")
+    is_global = not effective_project_id
+
+    if not is_global:
+        proj = await db.get(Project, effective_project_id)
+        if not proj:
+            raise NotFoundError("项目不存在")
+
+    sess = await _get_active_session(db, effective_project_id)
+    # Merge context into session context
+    sess.context = {**(sess.context or {}), **context_payload}
+
     try:
         user_msg = AssistantMessage(
             session_id=sess.id,
             role="user",
             content=user_input,
-            metadata_={},
+            metadata_={"context": context_payload},
         )
         db.add(user_msg)
         await db.flush()
@@ -112,30 +123,59 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     # 历史上下文（摘要 + 最近消息），不含 system 与当前用户输入
     history_context = build_history_context(sess, historical_messages[:-1], settings_obj)
 
-    # 1. 前置取数
-    from app import repositories as repo
-    context = {
-        "project_id": project_id,
-        "outlines": await repo.list_outlines(db, project_id),
-        "characters": await repo.list_characters(db, project_id),
-        "foreshadows": await repo.list_foreshadows(db, project_id),
-        "world": await repo.list_world(db, project_id),
-        "plot": await repo.list_plot(db, project_id),
-    }
+    if is_global:
+        # 全局会话：不读取项目实体，supervisor 返回空 tasks，responder 直接回答
+        context = {"project_id": None}
+        plan = {"intent": "通用对话", "tasks": []}
+        worker_results = []
+    else:
+        # 1. 前置取数
+        from app import repositories as repo
+        context = {
+            "project_id": effective_project_id,
+            "outlines": await repo.list_outlines(db, effective_project_id),
+            "characters": await repo.list_characters(db, effective_project_id),
+            "foreshadows": await repo.list_foreshadows(db, effective_project_id),
+            "world": await repo.list_world(db, effective_project_id),
+            "plot": await repo.list_plot(db, effective_project_id),
+        }
 
-    # 2. Supervisor 拆分（使用不含当前用户输入的 messages，当前输入单独传入）
-    supervisor_msgs = build_messages(
-        "你是小说创作助手的调度器。根据用户指令与项目现有数据，判断需要派发哪些专精 Worker 来处理。"
-        "可选 Worker：character（角色设计/调整）、world（世界观设定）、outline（大纲生成/调整）、"
-        "plot（剧情节点编排）、foreshadow（伏笔埋设/回收）。请返回 JSON："
-        '{"intent": "一句话意图", "tasks": [{"worker": "character", "goal": "..."}, ...]}。'
-        "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。",
-        sess,
-        historical_messages[:-1],
-        user_input,
-        settings_obj,
-    )
-    plan = await run_supervisor(llm, supervisor_msgs)
+        context_note = ""
+        if sess.context:
+            context_note = f"\n\n当前会话上下文：{json.dumps(sess.context, ensure_ascii=False)}"
+
+        # 2. Supervisor 拆分（使用不含当前用户输入的 messages，当前输入单独传入）
+        supervisor_msgs = build_messages(
+            "你是小说创作助手的调度器。根据用户指令与项目现有数据，判断需要派发哪些专精 Worker 来处理。"
+            "可选 Worker：character（角色设计/调整）、world（世界观设定）、outline（大纲生成/调整）、"
+            "plot（剧情节点编排）、foreshadow（伏笔埋设/回收）。请返回 JSON："
+            '{"intent": "一句话意图", "tasks": [{"worker": "character", "goal": "..."}, ...]}。\n\n'
+            "Worker 选择规则（严格按内容归类，禁止把世界观/规则类指令派给 outline）：\n"
+            "- world（世界观）：只要用户在新增/修改世界观、设定、力量体系、修炼境界、社会规则、"
+            "历史背景、地理环境、种族、宗教、神话、盟约/契约/法则/禁令，或出现'世界观''设定''规则''体系'等词，"
+            "就必须派给 world。此类指令绝不能派给 outline。\n"
+            "- character：用户明确提到角色、人物、主角、配角、性格、能力、关系、命运。\n"
+            "- outline：仅当用户明确提到大纲、章节结构、起承转合、主线/支线安排时才派给 outline。\n"
+            "- plot：用户提到具体剧情、事件、桥段、时间线节点。\n"
+            "- foreshadow：用户提到伏笔、悬念、回收/呼应。\n\n"
+            "若指令涉及当前上下文中的 entity_type/entity_id，应优先派给对应 worker（如果 project_id 可用）。"
+            f"{context_note}\n\n"
+            "示例（只输出 JSON，不要解释）：\n"
+            '用户：新增世界观设定：这是一个修仙世界，境界分为炼气、筑基。\n'
+            '输出：{"intent": "新增修仙世界观", "tasks": [{"worker": "world", "goal": "新增修仙世界观设定，境界划分为炼气、筑基"}]}\n'
+            '用户：写一下前三章大纲。\n'
+            '输出：{"intent": "生成前三章大纲", "tasks": [{"worker": "outline", "goal": "写前三章大纲"}]}\n'
+            '用户：众神盟约禁止对凡人直接出手，违反会导致世界重演。\n'
+            '输出：{"intent": "新增众神盟约世界观规则", "tasks": [{"worker": "world", "goal": "新增众神盟约世界观规则：禁止对凡人直接出手及违反后果"}]}\n'
+            '用户：主角性格应该更沉稳。\n'
+            '输出：{"intent": "调整主角性格", "tasks": [{"worker": "character", "goal": "调整主角性格，使其更沉稳"}]}\n\n'
+            "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。",
+            sess,
+            historical_messages[:-1],
+            user_input,
+            settings_obj,
+        )
+        plan = await run_supervisor(llm, supervisor_msgs)
     logger.warning("Assistant supervisor plan: %s", plan)
 
     # 3. 派发 Worker（仅通过只读工具取数，产出结构化结果，不落库）
@@ -155,7 +195,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         worker_results.append(result)
 
     # 4. aggregator -> ChangeRecord[]
-    records = aggregate(project_id, worker_results)
+    records = aggregate(effective_project_id, worker_results)
     logger.warning("Aggregated change records: %s", [r.model_dump() for r in records])
 
     # 5. 写入会话 staged_changes（仅引用，不落真实表）
@@ -165,7 +205,13 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     # 6. responder 摘要
-    summary = await respond(llm, records, user_input=user_input, history_context=history_context)
+    if is_global:
+        summary = await respond(
+            llm, records, user_input=user_input, history_context=history_context,
+            system_prompt=GLOBAL_RESPONDER_PROMPT,
+        )
+    else:
+        summary = await respond(llm, records, user_input=user_input, history_context=history_context)
 
     records_data = [r.model_dump() for r in records]
     assistant_msg_id = None
@@ -177,6 +223,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             metadata_={
                 "intent": plan.get("intent"),
                 "change_record_ids": [r.get("id") for r in records_data],
+                "context": context_payload,
             },
         )
         db.add(assistant_msg)
@@ -323,6 +370,8 @@ async def stage_change(body: dict, db: AsyncSession = Depends(get_db)):
     sess = await db.get(AssistantSession, session_id)
     if not sess:
         raise NotFoundError("会话不存在")
+    if sess.project_id is None:
+        raise ValidationError("全局会话不支持暂存变更")
     record["project_id"] = sess.project_id
     entity_type = record["entity_type"]
     if entity_type not in _ENTITY_REPO:
@@ -357,9 +406,12 @@ async def _mark_latest_assistant_message(db, session_id: str, status: str, count
 @router.post("/confirm")
 async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
     session_id = body.get("session_id")
+    change_ids = body.get("change_ids")
     if not session_id:
         raise ValidationError("session_id 必填")
-    result = await confirm_session(db, session_id)
+    if change_ids is not None and not isinstance(change_ids, list):
+        raise ValidationError("change_ids 必须是数组")
+    result = await confirm_session(db, session_id, change_ids=change_ids)
     try:
         if result.get("ok"):
             await _mark_latest_assistant_message(
@@ -379,9 +431,12 @@ async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
 @router.post("/reject")
 async def reject(body: dict, db: AsyncSession = Depends(get_db)):
     session_id = body.get("session_id")
+    change_ids = body.get("change_ids")
     if not session_id:
         raise ValidationError("session_id 必填")
-    result = await reject_session(db, session_id)
+    if change_ids is not None and not isinstance(change_ids, list):
+        raise ValidationError("change_ids 必须是数组")
+    result = await reject_session(db, session_id, change_ids=change_ids)
     try:
         await _mark_latest_assistant_message(
             db, session_id, "rejected", result.get("rejected_count", 0)

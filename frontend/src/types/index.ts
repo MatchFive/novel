@@ -28,7 +28,7 @@ export interface UserSettings {
 
 export interface AssistantSession {
   id: string;
-  project_id: string;
+  project_id: string | null;
   title: string;
   is_active: boolean;
   staged_changes: any[];
