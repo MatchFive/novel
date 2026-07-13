@@ -96,4 +96,5 @@ class ChapterUpdate(BaseModel):
 
 
 class ChapterReorder(BaseModel):
+    project_id: str
     chapter_ids: list[str]

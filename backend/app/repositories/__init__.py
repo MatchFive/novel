@@ -8,6 +8,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import ValidationError
 from app.models import (
     LongOutline,
     LongCharacter,
@@ -22,6 +23,13 @@ async def _list(db: AsyncSession, model, project_id: str) -> list[dict]:
     res = await db.execute(select(model).where(model.project_id == project_id))
     rows = res.scalars().all()
     return [{c.name: getattr(r, c.name) for c in model.__table__.columns} for r in rows]
+
+
+async def _row_to_dict(row) -> dict | None:
+    if row is None:
+        return None
+    model = type(row)
+    return {c.name: getattr(row, c.name) for c in model.__table__.columns}
 
 
 async def _get(db: AsyncSession, model, row_id: str):
@@ -99,7 +107,27 @@ async def delete_plot(db, rid): return await _delete(db, LongPlotNode, rid)
 
 # ---- Chapters ----
 async def list_chapters(db, project_id): return await _list(db, LongChapter, project_id)
-async def get_chapter(db, rid): return await _get(db, LongChapter, rid)
+async def get_chapter(db, rid):
+    row = await _get(db, LongChapter, rid)
+    return await _row_to_dict(row)
 async def create_chapter(db, data): return await _create(db, LongChapter, data)
 async def update_chapter(db, rid, data): return await _update(db, LongChapter, rid, data)
 async def delete_chapter(db, rid): return await _delete(db, LongChapter, rid)
+
+
+async def reorder_chapters(db: AsyncSession, project_id: str, chapter_ids: list[str]) -> bool:
+    if not chapter_ids:
+        return True
+
+    rows = []
+    for cid in chapter_ids:
+        row = await db.get(LongChapter, cid)
+        if row is None or row.project_id != project_id:
+            raise ValidationError(f"章节 {cid} 不存在或不属于该项目")
+        rows.append(row)
+
+    for idx, row in enumerate(rows):
+        row.order = idx
+
+    await db.commit()
+    return True
