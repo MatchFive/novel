@@ -39,11 +39,11 @@ export function ChapterEditor({ chapter, onSave }: ChapterEditorProps) {
   };
 
   const handleGenerate = (type: "outline" | "text") => {
-    const chapterName = chapter.title || "当前";
+    const chapterLabel = `第 ${chapter.order + 1} 章${chapter.title ? `《${chapter.title}》` : ""}`;
     const text =
       type === "outline"
-        ? `生成第 ${chapterName} 章细纲`
-        : `生成第 ${chapterName} 章正文`;
+        ? `生成${chapterLabel}细纲`
+        : `生成${chapterLabel}正文`;
     const context = { entity_type: "chapter", entity_id: chapter.id };
     useAssistantSession.getState().openAssistant();
     useAssistantSession.getState().sendMessage(chapter.project_id, text, context);

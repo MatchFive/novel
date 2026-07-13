@@ -12,8 +12,9 @@ interface AssistantChatProps {
   error: string | null;
   onConfirm: (changeIds?: string[]) => void;
   onReject: (changeIds?: string[]) => void;
-  onSend?: (text: string) => void;
+  onSend?: (text: string, context?: Record<string, any>) => void;
   onStageChange?: (record: ChangeRecord) => void;
+  sendContext?: Record<string, any>;
 }
 
 const REGENERATE_TEXTS: Record<string, string> = {
@@ -31,6 +32,8 @@ const QUICK_ACTIONS = [
   { stage: "chapter_outline", label: "重新生成细纲" },
   { stage: "chapter_text", label: "重新生成正文" },
 ];
+
+const CHAPTER_STAGES = new Set(["chapter_outline", "chapter_text"]);
 
 function StatusBadge({ metadata }: { metadata?: AssistantMessage["metadata"] }) {
   if (!metadata?.status) return null;
@@ -56,6 +59,7 @@ export default function AssistantChat({
   onReject,
   onSend,
   onStageChange,
+  sendContext,
 }: AssistantChatProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -118,7 +122,7 @@ export default function AssistantChat({
   const handleRegenerate = (stage: string) => {
     if (!onSend) return;
     const text = REGENERATE_TEXTS[stage];
-    if (text) onSend(text);
+    if (text) onSend(text, sendContext);
   };
 
   return (
@@ -170,17 +174,21 @@ export default function AssistantChat({
           </div>
 
           <div className="flex flex-wrap gap-2 rounded-none border border-line bg-paper p-2">
-            {QUICK_ACTIONS.map((action) => (
-              <Button
-                key={action.stage}
-                variant="subtle"
-                className="px-2 py-0.5 text-xs"
-                disabled={busy || !onSend}
-                onClick={() => handleRegenerate(action.stage)}
-              >
-                {action.label}
-              </Button>
-            ))}
+            {QUICK_ACTIONS.map((action) => {
+              const needsEntity = CHAPTER_STAGES.has(action.stage);
+              const missingEntity = needsEntity && !sendContext?.entity_id;
+              return (
+                <Button
+                  key={action.stage}
+                  variant="subtle"
+                  className="px-2 py-0.5 text-xs"
+                  disabled={busy || !onSend || missingEntity}
+                  onClick={() => handleRegenerate(action.stage)}
+                >
+                  {action.label}
+                </Button>
+              );
+            })}
           </div>
 
           <div className="space-y-2">

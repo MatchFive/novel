@@ -130,6 +130,7 @@ def _build_context_entities(context: dict) -> dict[str, list[dict]]:
         "plot": context.get("plot") or [],
         "foreshadow": context.get("foreshadows") or [],
         "world": context.get("world") or [],
+        "chapter": context.get("chapters") or [],
     }
 
 

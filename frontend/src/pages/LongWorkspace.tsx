@@ -209,6 +209,12 @@ function ChapterPanel({ pid }: { pid: string }) {
   }, [pid]);
 
   useEffect(() => {
+    setSelectedId(null);
+    setSelectedChapter(null);
+    setError(null);
+  }, [pid]);
+
+  useEffect(() => {
     if (selectedId) {
       loadDetail(selectedId);
     } else {

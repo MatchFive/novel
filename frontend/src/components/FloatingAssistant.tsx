@@ -7,6 +7,7 @@ import AssistantChat from "./AssistantChat";
 export default function FloatingAssistant() {
   const [input, setInput] = useState("");
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [lastContext, setLastContext] = useState<Record<string, any> | undefined>(undefined);
   const location = useLocation();
 
   const {
@@ -46,6 +47,7 @@ export default function FloatingAssistant() {
     if (projectId) {
       context.project_id = projectId;
     }
+    setLastContext(context);
 
     try {
       await sendMessage(projectId, text, context);
@@ -95,8 +97,9 @@ export default function FloatingAssistant() {
           error={error}
           onConfirm={confirm}
           onReject={reject}
-          onSend={(text) => sendMessage(projectId, text)}
+          onSend={(text, ctx) => sendMessage(projectId, text, ctx)}
           onStageChange={stageChange}
+          sendContext={lastContext}
         />
       </div>
 

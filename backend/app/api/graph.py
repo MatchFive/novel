@@ -24,8 +24,11 @@ async def graph_view(project_id: str, db: AsyncSession = Depends(get_db)):
     if g and g.enabled:
         chars = await g.query_nodes("Character")
         fores = await g.query_nodes("Foreshadow")
-        nodes = [{"id": n.get("id"), "label": n.get("name") or n.get("title"), "type": "character"} for n in chars + fores]
-        return {"source": "neo4j", "nodes": nodes, "edges": []}
+        nodes = [
+            {"id": n.get("id"), "label": n.get("name") or n.get("title"), "type": "character"}
+            for n in chars + fores
+        ]
+        return {"source": "neo4j", "width": 960, "height": 640, "nodes": nodes, "edges": []}
 
     # 降级：SQLite + NetworkX 自动布局
     return await build_project_graph(db, project_id)
