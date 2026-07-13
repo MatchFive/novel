@@ -65,6 +65,50 @@ async def test_worker_parses_final_json_into_changes():
     assert "raw" not in result
 
 
+@pytest.mark.anyio
+async def test_worker_prompt_includes_existing_characters_and_update_rule():
+    """CharacterWorker 应在 prompt 中携带现有角色，并明确要求同名时更新而非新增。"""
+    llm = AsyncMock()
+    llm.chat.return_value = json.dumps({"changes": []})
+
+    worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=1)
+    context = {"characters": [{"id": "c1", "name": "刘修", "traits": "穿越者"}]}
+    await worker.run("完善刘修的设定", context)
+
+    first_call = llm.chat.call_args_list[0]
+    messages = first_call.kwargs.get("messages") or first_call.args[0]
+    system_msg = messages[0]["content"]
+    user_msg = messages[-1]["content"]
+
+    assert "刘修" in user_msg
+    assert "c1" in user_msg
+    assert "action='update'" in system_msg
+    assert "不要创建与现有角色同名的重复角色" in system_msg
+
+
+@pytest.mark.anyio
+async def test_worker_uses_context_builder_when_project_id_present():
+    """CharacterWorker 在 context 包含 project_id 时应调用 ContextBuilder 并展示相关上下文。"""
+    llm = AsyncMock()
+    llm.chat.return_value = json.dumps({"changes": []})
+
+    worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=1)
+    with patch("app.agents.harness.workers.ContextBuilder") as MockBuilder:
+        MockBuilder.return_value.build = AsyncMock(
+            return_value="## 相关角色\n- [c2]\n  name: 刘修\n  traits: 穿越者"
+        )
+        context = {"project_id": "p1", "characters": [{"id": "c1", "name": "刘修"}]}
+        await worker.run("完善刘修的设定", context)
+
+    first_call = llm.chat.call_args_list[0]
+    messages = first_call.kwargs.get("messages") or first_call.args[0]
+    user_msg = messages[-1]["content"]
+
+    assert "相关角色" in user_msg
+    assert "刘修" in user_msg
+    MockBuilder.return_value.build.assert_awaited_once_with("p1", "完善刘修的设定", "character")
+
+
 def test_parse_final_extracts_json_from_markdown_explanation():
     """_parse_final 应能从说明文字 + 代码块的组合中提取 JSON。"""
     worker = CharacterWorker(db=AsyncMock(), llm=AsyncMock(), recursive_limit=1)
