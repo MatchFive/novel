@@ -121,12 +121,6 @@ export default function AssistantChat({
     if (text) onSend(text);
   };
 
-  const handleQuickAction = (stage: string) => {
-    if (!onSend) return;
-    const text = REGENERATE_TEXTS[stage];
-    if (text) onSend(text);
-  };
-
   return (
     <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
       {error && (
@@ -175,21 +169,19 @@ export default function AssistantChat({
             </button>
           </div>
 
-          {onSend && (
-            <div className="flex flex-wrap gap-2 rounded-none border border-line bg-paper p-2">
-              {QUICK_ACTIONS.map((action) => (
-                <Button
-                  key={action.stage}
-                  variant="subtle"
-                  className="px-2 py-0.5 text-xs"
-                  disabled={busy}
-                  onClick={() => handleQuickAction(action.stage)}
-                >
-                  {action.label}
-                </Button>
-              ))}
-            </div>
-          )}
+          <div className="flex flex-wrap gap-2 rounded-none border border-line bg-paper p-2">
+            {QUICK_ACTIONS.map((action) => (
+              <Button
+                key={action.stage}
+                variant="subtle"
+                className="px-2 py-0.5 text-xs"
+                disabled={busy || !onSend}
+                onClick={() => handleRegenerate(action.stage)}
+              >
+                {action.label}
+              </Button>
+            ))}
+          </div>
 
           <div className="space-y-2">
             {pendingRecords.map((r) => (

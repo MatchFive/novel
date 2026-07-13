@@ -42,22 +42,9 @@ export default function FloatingAssistant() {
     const text = input.trim();
     if (!text || busy) return;
 
-    const isLongProject = /\/project\/long\/[^/]+/.test(location.pathname);
-    const searchParams = new URLSearchParams(location.search);
-    const tab = searchParams.get("tab") || undefined;
-    const entityType = searchParams.get("entity_type") || undefined;
-    const entityId = searchParams.get("entity_id") || undefined;
-
     const context: Record<string, any> = { page_path: location.pathname };
     if (projectId) {
       context.project_id = projectId;
-    }
-    if (isLongProject && tab) {
-      context.tab = tab;
-      if (tab === "chapter" && entityType && entityId) {
-        context.entity_type = entityType;
-        context.entity_id = entityId;
-      }
     }
 
     try {

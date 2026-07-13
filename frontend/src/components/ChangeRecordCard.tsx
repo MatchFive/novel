@@ -63,7 +63,8 @@ export default function ChangeRecordCard({
 }: ChangeRecordCardProps) {
   const action = ACTION_LABELS[record.action] || record.action;
   const entity = ENTITY_LABELS[record.entity_type] || record.entity_type;
-  const stageLabel = record.stage ? STAGE_LABELS[record.stage] || record.stage : null;
+  const stage = record.stage;
+  const stageLabel = stage ? STAGE_LABELS[stage] || stage : null;
   const diffs = diffFields(record.before, record.after);
 
   const [editing, setEditing] = useState(false);
@@ -112,8 +113,8 @@ export default function ChangeRecordCard({
               编辑
             </Button>
           )}
-          {record.stage && onRegenerate && (
-            <Button variant="subtle" className="px-2 py-0.5 text-xs" onClick={() => onRegenerate(record.stage!)}>
+          {stage && onRegenerate && (
+            <Button variant="subtle" className="px-2 py-0.5 text-xs" onClick={() => onRegenerate(stage)}>
               重新生成
             </Button>
           )}
