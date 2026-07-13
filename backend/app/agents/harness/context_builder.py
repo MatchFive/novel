@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories as repo
 from app.core.llm_client import LLMClient
+
+
+logger = logging.getLogger(__name__)
 
 
 _STOP_WORDS = {
@@ -148,12 +152,15 @@ class ContextBuilder:
             resp = await self.llm.chat([{"role": "user", "content": prompt}])
             selected_ids = self._parse_selection(resp)
         except Exception:
+            logger.exception("ContextBuilder LLM selection failed, falling back to coarse filter")
             selected_ids = {}
 
         result: dict[str, list[dict]] = {}
         for entity_type, config in _ENTITY_CONFIG.items():
             entities = candidates.get(entity_type, [])
             ids = selected_ids.get(entity_type, []) if isinstance(selected_ids, dict) else []
+            if not isinstance(ids, list):
+                ids = []
             selected = [e for e in entities if e.get("id") in ids]
             if not selected:
                 selected = entities[:_SELECT_TOP_N]
