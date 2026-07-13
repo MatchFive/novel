@@ -28,7 +28,10 @@ export const longApi = {
   deletePlot: (id: string) => api.delete(`/long/plot/${id}`),
 
   chapters: (pid: string) => api.get(`/long/chapters/${pid}`),
+  getChapter: (id: string) => api.get(`/long/chapters/detail/${id}`),
   addChapter: (data: any) => api.post("/long/chapters", data),
   updateChapter: (id: string, data: any) => api.put(`/long/chapters/${id}`, data),
   deleteChapter: (id: string) => api.delete(`/long/chapters/${id}`),
+  reorderChapters: (project_id: string, chapter_ids: string[]) =>
+    api.post("/long/chapters/reorder", { project_id, chapter_ids }),
 };

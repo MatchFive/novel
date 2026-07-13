@@ -3,7 +3,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import { longApi } from "@/api/long";
 import { graphApi } from "@/api/graph";
 import AssistantStudio from "@/components/AssistantStudio";
+import { ChapterList } from "@/components/chapter/ChapterList";
+import { ChapterEditor } from "@/components/chapter/ChapterEditor";
 import { Button, Input, Textarea, Card, SectionTitle } from "@/components/ui";
+import type { Chapter } from "@/types";
 
 export default function LongWorkspace() {
   const { id } = useParams();
@@ -154,41 +157,112 @@ function CrudPanel({ pid, kind, label, fields }: { pid: string; kind: string; la
 }
 
 function ChapterPanel({ pid }: { pid: string }) {
-  const [items, setItems] = useState<any[]>([]);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
+  const [items, setItems] = useState<Chapter[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  const load = async () => {
-    const { data } = await longApi.chapters(pid);
-    setItems(data);
+  const loadItems = async () => {
+    setItemsLoading(true);
+    try {
+      const { data } = await longApi.chapters(pid);
+      setItems(data || []);
+    } finally {
+      setItemsLoading(false);
+    }
   };
-  useEffect(() => { load(); }, [pid]);
 
-  const add = async () => {
-    if (!title.trim()) return;
-    await longApi.addChapter({ project_id: pid, title, content, order: items.length });
-    setTitle(""); setContent(""); load();
+  const loadDetail = async (id: string) => {
+    setDetailLoading(true);
+    try {
+      const { data } = await longApi.getChapter(id);
+      setSelectedChapter(data);
+    } finally {
+      setDetailLoading(false);
+    }
   };
-  const saveContent = async (it: any, val: string) => {
-    await longApi.updateChapter(it.id, { content: val });
+
+  useEffect(() => {
+    loadItems();
+  }, [pid]);
+
+  useEffect(() => {
+    if (selectedId) {
+      loadDetail(selectedId);
+    } else {
+      setSelectedChapter(null);
+    }
+  }, [selectedId]);
+
+  const handleSelect = (id: string) => setSelectedId(id);
+
+  const handleAdd = async (title: string) => {
+    const { data } = await longApi.addChapter({
+      project_id: pid,
+      title,
+      content: "",
+      order: items.length,
+    });
+    await loadItems();
+    setSelectedId(data.id);
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("确定删除该章节吗？")) return;
+    await longApi.deleteChapter(id);
+    if (selectedId === id) setSelectedId(null);
+    await loadItems();
+  };
+
+  const handleMove = async (id: string, direction: -1 | 1) => {
+    const index = items.findIndex((c) => c.id === id);
+    if (index === -1) return;
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= items.length) return;
+    const newItems = [...items];
+    const [moved] = newItems.splice(index, 1);
+    newItems.splice(newIndex, 0, moved);
+    const newIds = newItems.map((c) => c.id);
+    await longApi.reorderChapters(pid, newIds);
+    await loadItems();
+  };
+
+  const handleSave = async (id: string, data: Partial<Chapter>) => {
+    await longApi.updateChapter(id, data);
+    await loadItems();
+    if (selectedId === id) {
+      await loadDetail(id);
+    }
   };
 
   return (
-    <div>
+    <div className="flex h-full flex-col">
       <SectionTitle>章节</SectionTitle>
-      <div className="mt-4 space-y-3">
-        {items.map((it) => (
-          <Card key={it.id} className="p-4">
-            <div className="text-sm font-medium text-ink">{it.title}</div>
-            <Textarea className="mt-2" rows={6} defaultValue={it.content} onBlur={(e) => saveContent(it, e.target.value)} />
-          </Card>
-        ))}
+      <div className="mt-4 flex h-0 flex-1 gap-4">
+        <div className="flex w-72 flex-col border border-line bg-surface p-3">
+          {itemsLoading ? (
+            <div className="text-sm text-muted">加载中…</div>
+          ) : (
+            <ChapterList
+              items={items}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              onAdd={handleAdd}
+              onDelete={handleDelete}
+              onMove={handleMove}
+            />
+          )}
+        </div>
+        <div className="relative flex flex-1 flex-col border border-line bg-surface p-3">
+          {detailLoading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface/80">
+              <span className="text-sm text-muted">加载中…</span>
+            </div>
+          )}
+          <ChapterEditor chapter={selectedChapter} onSave={handleSave} />
+        </div>
       </div>
-      <Card className="mt-4 space-y-3 p-4">
-        <Input placeholder="章节标题" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <Textarea placeholder="正文" rows={4} value={content} onChange={(e) => setContent(e.target.value)} />
-        <div><Button variant="primary" onClick={add}>+ 新增章节</Button></div>
-      </Card>
     </div>
   );
 }
@@ -196,20 +270,34 @@ function ChapterPanel({ pid }: { pid: string }) {
 function GraphPanel({ pid }: { pid: string }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<any>(null);
 
   const load = async () => {
     setLoading(true);
     try {
       const { data } = await graphApi.view(pid);
       setData(data);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { load(); }, [pid]);
+  useEffect(() => {
+    load();
+  }, [pid]);
 
   if (loading) return <div className="text-sm text-muted">加载中…</div>;
   if (!data) return <div className="text-sm text-muted">无数据</div>;
 
-  const colorByType: any = { character: "#3a2c22", foreshadow: "#b07a3c" };
+  const colorByType: Record<string, string> = {
+    character: "#3e2723",
+    outline: "#1b5e20",
+    foreshadow: "#e65100",
+    world: "#0d47a1",
+    plot: "#4a148c",
+    chapter: "#b71c1c",
+  };
+
+  const nodeMap = Object.fromEntries(data.nodes.map((n: any) => [n.id, n]));
 
   return (
     <div>
@@ -217,32 +305,97 @@ function GraphPanel({ pid }: { pid: string }) {
         <SectionTitle>知识图谱</SectionTitle>
         <span className="text-xs text-muted">数据源：{data.source}</span>
       </div>
-      <div className="mt-2 text-xs text-muted">节点 {data.nodes.length} · 关系 {data.edges.length}（点击角色可查看关系）</div>
-      <div className="mt-4 grid grid-cols-2 gap-4">
-        <Card className="p-4">
-          <div className="mb-2 text-xs font-medium text-muted">节点</div>
-          <div className="space-y-1">
-            {data.nodes.map((n: any) => (
-              <div key={n.id} className="flex items-center gap-2 text-sm">
-                <span className="inline-block h-2 w-2 rounded-full" style={{ background: colorByType[n.type] || "#9a8c7b" }} />
-                <span className="text-ink">{n.label}</span>
-                {n.state && <span className="text-[11px] text-muted">（{n.state}）</span>}
-              </div>
-            ))}
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="mb-2 text-xs font-medium text-muted">关系</div>
-          <div className="space-y-1 text-sm">
-            {data.edges.length === 0 && <div className="text-muted">暂无关系</div>}
-            {data.edges.map((e: any, i: number) => (
-              <div key={i} className="text-xs">
-                <span className="font-medium text-ink">{e.from}</span> <span className="text-muted">—{e.label}→</span> <span className="font-medium text-ink">{e.to}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
+      <div className="mt-2 text-xs text-muted">
+        节点 {data.nodes.length} · 关系 {data.edges.length}
       </div>
+
+      <div className="mt-4 overflow-hidden rounded border border-line bg-surface">
+        <svg
+          viewBox={`0 0 ${data.width} ${data.height}`}
+          preserveAspectRatio="xMidYMid meet"
+          className="h-auto w-full"
+        >
+          {data.edges.map((e: any, i: number) => {
+            const from = nodeMap[e.from];
+            const to = nodeMap[e.to];
+            if (!from || !to) return null;
+            return (
+              <line
+                key={`edge-${i}`}
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke="var(--line)"
+                strokeWidth="1.5"
+              />
+            );
+          })}
+          {data.nodes.map((n: any) => (
+            <g
+              key={n.id}
+              transform={`translate(${n.x}, ${n.y})`}
+              className="cursor-pointer"
+              onClick={() => setSelected(n)}
+            >
+              <circle
+                r="7"
+                fill={colorByType[n.type] || "#9a8c7b"}
+                stroke="var(--surface)"
+                strokeWidth="2"
+              />
+              <text
+                y="19"
+                textAnchor="middle"
+                style={{
+                  fill: "var(--ink)",
+                  fontSize: "11px",
+                  fontWeight: 500,
+                  textShadow: "0 1px 2px var(--surface)",
+                }}
+              >
+                {n.label}
+              </text>
+            </g>
+          ))}
+        </svg>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-3 text-xs">
+        {Object.entries({
+          角色: colorByType.character,
+          大纲: colorByType.outline,
+          伏笔: colorByType.foreshadow,
+          世界观: colorByType.world,
+          剧情节点: colorByType.plot,
+          章节: colorByType.chapter,
+        }).map(([label, color]) => (
+          <div key={label} className="flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ background: color }} />
+            <span className="text-muted">{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {selected && (
+        <Card className="mt-4 p-3 text-sm">
+          <div className="font-medium text-ink">{selected.label}</div>
+          <div className="text-xs text-muted">{selected.type_label || selected.type}</div>
+          <div className="mt-2 text-xs text-muted">
+            关联：
+            {data.edges
+              .filter((e: any) => e.from === selected.id || e.to === selected.id)
+              .map((e: any, i: number) => {
+                const other = nodeMap[e.from === selected.id ? e.to : e.from];
+                return (
+                  <span key={i} className="mr-2 inline-block">
+                    {e.label} → {other?.label || "?"}
+                  </span>
+                );
+              })}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

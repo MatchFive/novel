@@ -48,6 +48,16 @@ export interface ChangeRecord {
   requires_confirmation: boolean;
 }
 
+export interface Chapter {
+  id: string;
+  project_id: string;
+  title: string;
+  content: string;
+  order: number;
+  detailed_outline?: string;
+  status?: string;
+}
+
 export interface AssistantMessage {
   id: string;
   role: "user" | "assistant" | "system";
