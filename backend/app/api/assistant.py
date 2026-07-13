@@ -115,6 +115,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     # 1. 前置取数
     from app import repositories as repo
     context = {
+        "project_id": project_id,
         "outlines": await repo.list_outlines(db, project_id),
         "characters": await repo.list_characters(db, project_id),
         "foreshadows": await repo.list_foreshadows(db, project_id),
