@@ -42,50 +42,82 @@ class WorldWorker(WorkerBase):
     worker_name = "world"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
+        project_id = context.get("project_id")
+        related = ""
+        if project_id:
+            builder = ContextBuilder(self.db, self.llm)
+            related = await builder.build(project_id, goal, "world")
+
         system = (
             "你是世界观设定师。使用只读工具 read_world 了解现有设定，"
             '返回 JSON：{"changes":[{"action":"add|update","entity_id":null或id,'
-            '"fields":{"category":"","content":""}}]}。'
+            '"fields":{"category":"","content":""}}]}。\n\n'
+            "参考【相关上下文】保持世界观设定与角色、大纲一致，避免冲突。\n"
             "工具调用格式：TOOL_CALL:{\"name\":\"read_world\",\"arguments\":{\"project_id\":\"...\"}}"
         )
-        return await self._tool_loop(system, goal, history_context=history_context)
+        user_prompt = f"【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
+        return await self._tool_loop(system, user_prompt, history_context=history_context)
 
 
 class OutlineWorker(WorkerBase):
     worker_name = "outline"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
+        project_id = context.get("project_id")
+        related = ""
+        if project_id:
+            builder = ContextBuilder(self.db, self.llm)
+            related = await builder.build(project_id, goal, "outline")
+
         system = (
             "你是大纲架构师。使用只读工具 read_outlines / read_outline / read_outline_prev_version "
             "了解现有大纲与版本链，再产出新大纲修订。"
             '返回 JSON：{"changes":[{"action":"add|update","entity_id":null或id,'
-            '"fields":{"title":"","content":"","parent_id":null}}]}。'
-            "工具调用格式：TOOL_CALL:{\"name\":\"read_outlines\",\"arguments\":{\"project_id\":\"...\"}}"
+            '"fields":{"title":"","content":"","parent_id":null}}]}。\n\n'
+            "参考【相关上下文】保持大纲与角色、剧情节点、伏笔、世界观一致。\n"
+            "若需调用工具，请输出 TOOL_CALL:{\"name\":\"read_outlines\",\"arguments\":{\"project_id\":\"...\"}}"
         )
-        return await self._tool_loop(system, goal, history_context=history_context)
+        user_prompt = f"【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
+        return await self._tool_loop(system, user_prompt, history_context=history_context)
 
 
 class PlotWorker(WorkerBase):
     worker_name = "plot"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
+        project_id = context.get("project_id")
+        related = ""
+        if project_id:
+            builder = ContextBuilder(self.db, self.llm)
+            related = await builder.build(project_id, goal, "plot")
+
         system = (
             "你是剧情节点编排师。使用只读工具 read_plot_nodes / read_outlines 取数，"
             '返回 JSON：{"changes":[{"action":"add|update","entity_id":null或id,'
-            '"fields":{"title":"","summary":"","timeline_pos":""}}]}。'
-            "工具调用格式：TOOL_CALL:{\"name\":\"read_plot_nodes\",\"arguments\":{\"project_id\":\"...\"}}"
+            '"fields":{"title":"","summary":"","timeline_pos":""}}]}。\n\n'
+            "参考【相关上下文】保持剧情节点与角色、大纲、伏笔一致。\n"
+            "若需调用工具，请输出 TOOL_CALL:{\"name\":\"read_plot_nodes\",\"arguments\":{\"project_id\":\"...\"}}"
         )
-        return await self._tool_loop(system, goal, history_context=history_context)
+        user_prompt = f"【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
+        return await self._tool_loop(system, user_prompt, history_context=history_context)
 
 
 class ForeshadowWorker(WorkerBase):
     worker_name = "foreshadow"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
+        project_id = context.get("project_id")
+        related = ""
+        if project_id:
+            builder = ContextBuilder(self.db, self.llm)
+            related = await builder.build(project_id, goal, "foreshadow")
+
         system = (
             "你是伏笔设计师。使用只读工具 read_foreshadows / read_plot_nodes 取数，"
             '返回 JSON：{"changes":[{"action":"add|update","entity_id":null或id,'
-            '"fields":{"title":"","content":"","state":"pending","subplot_id":null}}]}。'
-            "工具调用格式：TOOL_CALL:{\"name\":\"read_foreshadows\",\"arguments\":{\"project_id\":\"...\"}}"
+            '"fields":{"title":"","content":"","state":"pending","subplot_id":null}}]}。\n\n'
+            "参考【相关上下文】保持伏笔与角色、剧情节点、大纲一致。\n"
+            "若需调用工具，请输出 TOOL_CALL:{\"name\":\"read_foreshadows\",\"arguments\":{\"project_id\":\"...\"}}"
         )
-        return await self._tool_loop(system, goal, history_context=history_context)
+        user_prompt = f"【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
+        return await self._tool_loop(system, user_prompt, history_context=history_context)
