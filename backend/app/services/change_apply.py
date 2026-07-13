@@ -3,6 +3,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import select
@@ -40,6 +41,15 @@ async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
     get_fn, create_fn, update_fn, delete_fn = repo_tuple
 
     try:
+        if entity_type == "world":
+            # 世界观 content 应为文本；LLM 有时会返回 JSON 对象，需要兼容
+            content = after.get("content")
+            if not isinstance(content, str):
+                after["content"] = json.dumps(content, ensure_ascii=False) if isinstance(content, (dict, list)) else str(content)
+            category = after.get("category")
+            if not isinstance(category, str):
+                after["category"] = str(category)
+
         if action == "add":
             data = dict(after)
             data["project_id"] = project_id
@@ -75,24 +85,37 @@ async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
         raise AppError(f"应用变更失败：{e}", "APPLY_FAILED", 500)
 
 
-async def confirm_session(db: AsyncSession, session_id: str) -> dict:
-    """确认会话中的全部 staged_changes，逐条 Saga 应用。"""
+async def confirm_session(db: AsyncSession, session_id: str, change_ids: list[str] | None = None) -> dict:
+    """确认会话中的 staged_changes。传入 change_ids 时只确认指定条目，其余保留。"""
     res = await db.execute(select(AssistantSession).where(AssistantSession.id == session_id))
     sess = res.scalars().first()
     if not sess:
         raise NotFoundError("会话不存在")
     project_id = sess.project_id
     staged = sess.staged_changes or []
+    target_ids = set(change_ids) if change_ids else None
     applied = []
     errors = []
     success_ids = set()
+    remaining = []
     for ch in staged:
+        ch_id = ch.get("id")
+        if target_ids is not None and ch_id not in target_ids:
+            remaining.append(ch)
+            continue
         try:
             r = await apply_change(db, project_id, ch)
-            applied.append(r)
-            success_ids.add(ch.get("id"))
+            applied.append({**r, "change_id": ch_id})
+            success_ids.add(ch_id)
         except AppError as e:
-            errors.append({"change_id": ch.get("id"), "code": e.code, "message": e.message})
+            errors.append({"change_id": ch_id, "code": e.code, "message": e.message})
+            # apply_change 内部若发生数据库异常，当前 transaction 可能已回滚，
+            # 需要显式 rollback 才能继续后续会话状态写入。
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            remaining.append(ch)
     # 记录到 long_change_records（仅成功项）
     for ch in staged:
         if ch.get("id") in success_ids:
@@ -104,17 +127,26 @@ async def confirm_session(db: AsyncSession, session_id: str) -> dict:
                 after=ch.get("after"),
                 status="applied",
             ))
-    sess.staged_changes = []
+    sess.staged_changes = remaining
     await db.commit()
     return {"ok": len(errors) == 0, "applied": applied, "errors": errors}
 
 
-async def reject_session(db: AsyncSession, session_id: str) -> dict:
+async def reject_session(db: AsyncSession, session_id: str, change_ids: list[str] | None = None) -> dict:
+    """拒绝会话中的 staged_changes。传入 change_ids 时只拒绝指定条目，其余保留。"""
     res = await db.execute(select(AssistantSession).where(AssistantSession.id == session_id))
     sess = res.scalars().first()
     if not sess:
         raise NotFoundError("会话不存在")
-    rejected_count = len(sess.staged_changes or [])
-    sess.staged_changes = []
+    staged = sess.staged_changes or []
+    target_ids = set(change_ids) if change_ids else None
+    rejected = 0
+    remaining = []
+    for ch in staged:
+        if target_ids is None or ch.get("id") in target_ids:
+            rejected += 1
+        else:
+            remaining.append(ch)
+    sess.staged_changes = remaining
     await db.commit()
-    return {"ok": True, "rejected_count": rejected_count}
+    return {"ok": True, "rejected_count": rejected}

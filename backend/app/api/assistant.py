@@ -411,6 +411,11 @@ async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
         raise ValidationError("session_id 必填")
     if change_ids is not None and not isinstance(change_ids, list):
         raise ValidationError("change_ids 必须是数组")
+    sess = await db.get(AssistantSession, session_id)
+    if not sess:
+        raise NotFoundError("会话不存在")
+    if sess.project_id is None:
+        return {"ok": False, "errors": [{"code": "GLOBAL_SESSION", "message": "全局会话不支持确认变更"}]}
     result = await confirm_session(db, session_id, change_ids=change_ids)
     try:
         if result.get("ok"):
