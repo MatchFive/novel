@@ -21,7 +21,7 @@ export const hotspotApi = {
 
 export const assistantApi = {
   chat: (pid: string | null, message: string, context?: Record<string, any>) =>
-    api.post("/assistant/chat", { project_id: pid, message, context }),
+    api.post("/assistant/chat", { project_id: pid, message, context }, { timeout: 600000 }),
   session: (pid: string) => api.get(`/assistant/session/${pid}`),
   history: (pid: string) => api.get(`/assistant/session/${pid}/history`),
   sessions: (pid: string) => api.get(`/assistant/sessions/${pid}`),
