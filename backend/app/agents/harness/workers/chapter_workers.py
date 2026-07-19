@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import select
 
 from app import repositories as repo
-from app.agents.harness.context_builder import ContextBuilder, build_entities_from_context
+from app.agents.harness.context_builder import ContextBuilder
 from app.agents.harness.prompts.chapter_generation import (
     assignment_prompt,
     broad_outline_prompt,
@@ -185,13 +185,9 @@ class BroadOutlineWorker(WorkerBase):
         existing_outlines = await repo.list_outlines(self.db, project_id)
 
         related = ""
-        builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
+        builder = ContextBuilder(self.db, self.llm, entities=context)
         try:
-            related = await builder.build(
-                goal,
-                focus_entity_type="outline",
-                focus_entity_id=context.get("entity_id"),
-            )
+            related = await builder.build(goal, focus_entity_type="outline")
         except Exception:
             logger.exception("ContextBuilder failed for broad_outline")
 
@@ -231,13 +227,9 @@ class PlotNodesWorker(WorkerBase):
         plot_nodes = await repo.list_plot(self.db, project_id)
 
         related = ""
-        builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
+        builder = ContextBuilder(self.db, self.llm, entities=context)
         try:
-            related = await builder.build(
-                goal,
-                focus_entity_type="plot",
-                focus_entity_id=context.get("entity_id"),
-            )
+            related = await builder.build(goal, focus_entity_type="plot")
         except Exception:
             logger.exception("ContextBuilder failed for plot_nodes")
 
@@ -276,13 +268,9 @@ class AssignmentWorker(WorkerBase):
         chapters = await repo.list_chapters(self.db, project_id)
 
         related = ""
-        builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
+        builder = ContextBuilder(self.db, self.llm, entities=context)
         try:
-            related = await builder.build(
-                goal,
-                focus_entity_type="chapter",
-                focus_entity_id=context.get("entity_id"),
-            )
+            related = await builder.build(goal, focus_entity_type="chapter")
         except Exception:
             logger.exception("ContextBuilder failed for assignment")
 
@@ -336,13 +324,9 @@ class ChapterOutlineWorker(WorkerBase):
         chapter_id = chapter.get("id")
 
         related = ""
-        builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
+        builder = ContextBuilder(self.db, self.llm, entities=context)
         try:
-            related = await builder.build(
-                goal,
-                focus_entity_type="chapter",
-                focus_entity_id=context.get("entity_id"),
-            )
+            related = await builder.build(goal, focus_entity_type="chapter")
         except Exception:
             logger.exception("ContextBuilder failed for chapter_outline")
 

@@ -1,6 +1,7 @@
 """Agent 助手接口：chat（分析→派发→变更）、confirm（应用）、reject、undo。"""
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 
@@ -9,19 +10,14 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, NotFoundError, ValidationError
-from app.core.llm_factory import get_llm_client, get_embedding_client
+from app.core.llm_factory import get_llm_client
 from app.database import get_db
 from app.models import AssistantSession, AssistantMessage, LongChangeRecord, Project, UserSetting
 from app.agents.harness.history import (
     build_history_context,
-    build_messages,
     should_summarize,
     summarize_messages,
     append_summary,
-)
-from app.agents.harness.retrieval import (
-    store_summary_embedding,
-    retrieve_similar_summaries,
 )
 from app.agents.harness.nodes.supervisor import run_supervisor
 from app.agents.harness.workers import (
@@ -35,6 +31,19 @@ from app.services.change_apply import _ENTITY_REPO, apply_change, confirm_sessio
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["assistant"])
+
+# 兼容 committed 3 参 (session, messages, settings) 与检索 WIP 4 参
+# (session, recent_messages, retrieved_summaries, settings) 的 build_history_context。
+_HISTORY_CONTEXT_ACCEPTS_RETRIEVED = (
+    "retrieved_summaries" in inspect.signature(build_history_context).parameters
+)
+
+
+def _build_history_context(sess, recent_messages, settings_obj):
+    """按当前 history 模块的实际签名调用 build_history_context（不依赖未提交的检索 WIP）。"""
+    if _HISTORY_CONTEXT_ACCEPTS_RETRIEVED:
+        return build_history_context(sess, recent_messages, [], settings_obj)
+    return build_history_context(sess, recent_messages, settings_obj)
 
 _WORKERS = {
     "character": CharacterWorker,
@@ -233,7 +242,6 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     message_ids = [row[0] for row in ids_res.all()]
     current_idx = len(message_ids) - 1  # 即刚保存的用户消息
     recent_n = max(1, settings_obj.assistant_history_recent_messages or 20)
-    top_k = max(0, settings_obj.assistant_history_top_k or 5)
     recent_ids = message_ids[max(0, current_idx - recent_n):current_idx]
 
     recent_res = await db.execute(
@@ -243,28 +251,8 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     )
     recent_messages = recent_res.scalars().all()
 
-    # 检索与当前输入相似的历史摘要（基于摘要 embedding）
-    retrieved_summaries: list[dict] = []
-    try:
-        embedding_client, dimension = await get_embedding_client(db)
-        query_vectors = await embedding_client.embed(
-            [user_input],
-            model=embedding_client.model,
-            dimensions=dimension if dimension > 0 else None,
-        )
-        query_vector = query_vectors[0]
-        if top_k > 0:
-            retrieved_summaries = await retrieve_similar_summaries(
-                db,
-                sess.id,
-                query_vector,
-                top_k,
-            )
-    except Exception:
-        logger.exception("Summary embedding retrieval failed, falling back to recent messages only")
-
-    # 历史上下文（摘要 + 相似检索摘要 + 最近消息），不含 system 与当前用户输入
-    history_context = build_history_context(sess, recent_messages, retrieved_summaries, settings_obj)
+    # 历史上下文（历史摘要 + 最近消息），不含 system 与当前用户输入
+    history_context = _build_history_context(sess, recent_messages, settings_obj)
 
     if is_global:
         # 全局会话：不读取项目实体，supervisor 返回空 tasks，responder 直接回答
@@ -344,22 +332,35 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             '输出：{"intent": "新增配角并完善大纲", "tasks": [{"worker": "character", "goal": "为项目新增一批配角"}, {"worker": "outline", "goal": "根据新增配角完善现有大纲"}]}\n\n'
             "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。"
         )
-        supervisor_msgs = build_messages(
-            supervisor_prompt,
-            history_context,
-            user_input,
-        )
+        supervisor_msgs = [
+            {"role": "system", "content": supervisor_prompt},
+            *history_context,
+            {"role": "user", "content": user_input},
+        ]
         supervisor_llm = await get_llm_client(db, level="medium")
         plan = await run_supervisor(supervisor_llm, supervisor_msgs)
 
-        # 规则化兜底：若 supervisor 漏拆复合意图，用规则检测补充分拆
+        # 规则化兜底：复合意图与 supervisor 计划做并集合并，
+        # 保留 supervisor 已识别的 worker，只补追加规则命中但缺失的 worker
         compound_plan = _detect_compound_intent(user_input)
         if compound_plan is not None:
-            supervisor_tasks = {t.get("worker") for t in plan.get("tasks", [])}
-            compound_tasks = {t.get("worker") for t in compound_plan["tasks"]}
-            if not supervisor_tasks.issuperset(compound_tasks):
-                logger.warning("Supervisor missed compound intent, using rule-based plan: %s", compound_plan)
+            supervisor_tasks = list(plan.get("tasks", []))
+            if not supervisor_tasks:
                 plan = compound_plan
+            else:
+                existing_workers = {t.get("worker") for t in supervisor_tasks}
+                missing = [t for t in compound_plan["tasks"] if t.get("worker") not in existing_workers]
+                if missing:
+                    logger.warning(
+                        "Supervisor missed compound intent workers %s, merging rule-based tasks into plan",
+                        [t.get("worker") for t in missing],
+                    )
+                    for task in missing:
+                        supervisor_tasks.append({
+                            **task,
+                            "goal": f"{task.get('goal', '')}。用户原始指令：{user_input}",
+                        })
+                    plan["tasks"] = supervisor_tasks
 
     logger.warning("Assistant supervisor plan: %s", plan)
 
@@ -455,7 +456,6 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     else:
         summary = await respond(
             responder_llm, staged_records, user_input=user_input, history_context=history_context,
-            context=context, worker_results=worker_results,
         )
 
     if auto_applied:
@@ -481,6 +481,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
                 "intent": plan.get("intent"),
                 "change_record_ids": [r.get("id") for r in records_data],
                 "context": context_payload,
+                "auto_applied": auto_applied,
             },
         )
         db.add(assistant_msg)
@@ -508,23 +509,6 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             append_summary(sess, recent, summary_text, settings_obj)
             await db.commit()
             await db.refresh(sess)
-
-            # 为新生成的摘要生成并持久化 embedding
-            try:
-                embedding_client, dimension = await get_embedding_client(db)
-                latest_summary = (sess.summaries or [])[-1]
-                await store_summary_embedding(
-                    db,
-                    sess.id,
-                    latest_summary.get("turn_range", ""),
-                    latest_summary.get("summary", ""),
-                    embedding_client,
-                    embedding_client.model,
-                    dimension,
-                )
-                await db.commit()
-            except Exception:
-                logger.exception("Failed to store summary embedding")
     except Exception:
         logger.exception("Failed to persist assistant message")
         await db.rollback()
