@@ -54,6 +54,13 @@ export interface ChangeRecord {
   stage?: string;
 }
 
+export interface AutoAppliedItem {
+  entity_id: string;
+  entity_type: string;
+  fields: string[];
+  notes: string[];
+}
+
 export interface Chapter {
   id: string;
   project_id: string;
@@ -71,6 +78,7 @@ export interface AssistantMessage {
   metadata?: {
     intent?: string;
     change_record_ids?: string[];
+    auto_applied?: AutoAppliedItem[];
     status?: "applied" | "rejected" | "partial";
     applied_count?: number;
     rejected_count?: number;

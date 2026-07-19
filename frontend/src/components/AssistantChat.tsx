@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui";
 import ChangeRecordCard from "./ChangeRecordCard";
-import type { AssistantMessage, ChangeRecord } from "@/types";
+import type { AssistantMessage, AutoAppliedItem, ChangeRecord } from "@/types";
 
 interface AssistantChatProps {
   messages: AssistantMessage[];
@@ -14,6 +14,7 @@ interface AssistantChatProps {
   onReject: (changeIds?: string[]) => void;
   onSend?: (text: string, context?: Record<string, any>) => void;
   onStageChange?: (record: ChangeRecord) => void;
+  onUndo?: (item: AutoAppliedItem) => void;
   sendContext?: Record<string, any>;
 }
 
@@ -59,6 +60,7 @@ export default function AssistantChat({
   onReject,
   onSend,
   onStageChange,
+  onUndo,
   sendContext,
 }: AssistantChatProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -155,6 +157,32 @@ export default function AssistantChat({
             {m.role === "assistant" && (
               <div className="flex items-center justify-between gap-4 pt-1">
                 <StatusBadge metadata={m.metadata} />
+              </div>
+            )}
+            {m.role === "assistant" && (m.metadata?.auto_applied?.length ?? 0) > 0 && (
+              <div className="mt-2 space-y-1 border-t border-line pt-2">
+                {m.metadata!.auto_applied!.map((a, i) => (
+                  <div key={i} className="space-y-0.5">
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="text-ink">
+                        已写入章节{a.fields.includes("content") ? "正文" : "细纲"}
+                      </span>
+                      {onUndo && (
+                        <Button
+                          variant="subtle"
+                          className="px-2 py-0.5 text-xs"
+                          disabled={busy}
+                          onClick={() => onUndo(a)}
+                        >
+                          撤销
+                        </Button>
+                      )}
+                    </div>
+                    {a.notes.map((n, j) => (
+                      <div key={j} className="text-xs text-muted">{n}</div>
+                    ))}
+                  </div>
+                ))}
               </div>
             )}
           </div>

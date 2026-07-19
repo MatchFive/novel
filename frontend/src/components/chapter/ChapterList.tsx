@@ -9,6 +9,8 @@ interface ChapterListProps {
   onAdd: (title: string) => void;
   onDelete: (id: string) => void;
   onMove: (id: string, direction: -1 | 1) => void;
+  onGenerate?: (chapter: Chapter) => void;
+  generating?: boolean;
 }
 
 export function ChapterList({
@@ -18,6 +20,8 @@ export function ChapterList({
   onAdd,
   onDelete,
   onMove,
+  onGenerate,
+  generating,
 }: ChapterListProps) {
   const sorted = [...items].sort((a, b) => a.order - b.order);
   const [newTitle, setNewTitle] = useState("");
@@ -73,6 +77,18 @@ export function ChapterList({
                 >
                   下移
                 </Button>
+                {onGenerate && (
+                  <Button
+                    variant="ghost"
+                    disabled={generating}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onGenerate(it);
+                    }}
+                  >
+                    {it.detailed_outline ? "生成正文" : "生成细纲"}
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   onClick={(e) => {

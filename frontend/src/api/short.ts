@@ -33,4 +33,7 @@ export const assistantApi = {
     api.post("/assistant/confirm", { session_id: sessionId, change_ids: changeIds }),
   reject: (sessionId: string, changeIds?: string[]) =>
     api.post("/assistant/reject", { session_id: sessionId, change_ids: changeIds }),
+  undo: (projectId: string, entityType: string, entityId: string) =>
+    api.post("/assistant/undo", { project_id: projectId, entity_type: entityType, entity_id: entityId }),
+  undoable: (chapterId: string) => api.get(`/assistant/undoable/${chapterId}`),
 };

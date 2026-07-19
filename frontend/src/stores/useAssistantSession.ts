@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { assistantApi } from "@/api/short";
-import type { AssistantMessage, AssistantSession, ChangeRecord } from "@/types";
+import type { AssistantMessage, AssistantSession, AutoAppliedItem, ChangeRecord } from "@/types";
 
 interface AssistantSessionState {
   sessionId: string | null;
@@ -10,6 +10,7 @@ interface AssistantSessionState {
   pendingRecords: ChangeRecord[];
   error: string | null;
   assistantOpen: boolean;
+  chaptersVersion: number;
   reset: () => void;
   loadHistory: (pid: string | null) => Promise<void>;
   loadSessions: (pid: string | null) => Promise<void>;
@@ -19,6 +20,7 @@ interface AssistantSessionState {
   stageChange: (record: ChangeRecord) => Promise<void>;
   confirm: (changeIds?: string[]) => Promise<void>;
   reject: (changeIds?: string[]) => Promise<void>;
+  undoAuto: (projectId: string, entityType: string, entityId: string) => Promise<void>;
   setAssistantOpen: (open: boolean) => void;
   openAssistant: () => void;
 }
@@ -31,6 +33,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
   pendingRecords: [],
   error: null,
   assistantOpen: false,
+  chaptersVersion: 0,
 
   reset: () => {
     set({ sessionId: null, sessions: [], messages: [], pendingRecords: [], error: null, assistantOpen: false });
@@ -112,6 +115,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
         metadata: {
           intent: data.intent,
           change_record_ids: (data.change_records || []).map((r: ChangeRecord) => r.id),
+          auto_applied: data.auto_applied || [],
         },
         created_at: new Date().toISOString(),
       };
@@ -119,6 +123,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
         sessionId: data.session_id,
         messages: [...s.messages, assistantMsg],
         pendingRecords: [...s.pendingRecords, ...(data.change_records || [])],
+        chaptersVersion: (data.auto_applied?.length ? s.chaptersVersion + 1 : s.chaptersVersion),
       }));
     } catch (err) {
       const errorText = err instanceof Error ? err.message : "发送失败";
@@ -266,6 +271,22 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "拒绝失败" });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  undoAuto: async (projectId: string, entityType: string, entityId: string) => {
+    set({ busy: true, error: null });
+    try {
+      const { data } = await assistantApi.undo(projectId, entityType, entityId);
+      if (!data.ok) {
+        set({ error: data.message || "没有可撤销的自动生成" });
+        return;
+      }
+      set((s) => ({ chaptersVersion: s.chaptersVersion + 1 }));
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "撤销失败" });
     } finally {
       set({ busy: false });
     }

@@ -36,6 +36,7 @@ export default function FloatingAssistant() {
     confirm,
     reject,
     stageChange,
+    undoAuto,
     reset,
   } = useAssistantSession();
 
@@ -177,6 +178,11 @@ export default function FloatingAssistant() {
             sendMessage(projectId === "global" ? null : projectId, text, ctx)
           }
           onStageChange={stageChange}
+          onUndo={(item) => {
+            if (projectId && projectId !== "global") {
+              undoAuto(projectId, item.entity_type, item.entity_id);
+            }
+          }}
           sendContext={lastContext}
         />
       </div>

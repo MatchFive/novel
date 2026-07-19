@@ -6,9 +6,11 @@ import type { Chapter } from "@/types";
 interface ChapterEditorProps {
   chapter: Chapter | null;
   onSave: (id: string, data: Partial<Chapter>) => void;
+  onUndo?: () => void;
+  undoable?: boolean;
 }
 
-export function ChapterEditor({ chapter, onSave }: ChapterEditorProps) {
+export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEditorProps) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
 
@@ -67,6 +69,11 @@ export function ChapterEditor({ chapter, onSave }: ChapterEditorProps) {
         <Button variant="ghost" onClick={() => handleGenerate("text")}>
           生成正文
         </Button>
+        {undoable && onUndo && (
+          <Button variant="ghost" onClick={onUndo}>
+            撤销生成
+          </Button>
+        )}
       </div>
 
       <div className="flex-1">

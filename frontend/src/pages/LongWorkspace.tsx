@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { longApi } from "@/api/long";
 import { graphApi } from "@/api/graph";
+import { assistantApi } from "@/api/short";
+import { useAssistantSession } from "@/stores/useAssistantSession";
 import { ChapterList } from "@/components/chapter/ChapterList";
 import { ChapterEditor } from "@/components/chapter/ChapterEditor";
 import { EntityWorkbench, type EntityWorkbenchConfig } from "@/components/EntityWorkbench";
@@ -153,6 +155,9 @@ function ChapterPanel({ pid }: { pid: string }) {
   const [itemsLoading, setItemsLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [undoable, setUndoable] = useState(false);
+  const generating = useAssistantSession((s) => s.busy);
+  const chaptersVersion = useAssistantSession((s) => s.chaptersVersion);
   const detailReqIdRef = useRef<number>(0);
 
   const showError = (e: unknown) => {
@@ -199,6 +204,24 @@ function ChapterPanel({ pid }: { pid: string }) {
   useEffect(() => {
     loadItems();
   }, [pid]);
+
+  // 自动生成写入/撤销后刷新章节数据
+  useEffect(() => {
+    if (chaptersVersion > 0) {
+      loadItems();
+      if (selectedId) loadDetail(selectedId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaptersVersion]);
+
+  // 选中章节的撤销可用性
+  useEffect(() => {
+    setUndoable(false);
+    if (!selectedId) return;
+    assistantApi.undoable(selectedId)
+      .then(({ data }) => setUndoable(!!data.undoable))
+      .catch(() => {});
+  }, [selectedId, chaptersVersion]);
 
   useEffect(() => {
     setSelectedId(null);
@@ -278,6 +301,21 @@ function ChapterPanel({ pid }: { pid: string }) {
     }
   };
 
+  const handleGenerate = (chapter: Chapter) => {
+    const type = chapter.detailed_outline ? "text" : "outline";
+    const chapterLabel = `第 ${chapter.order + 1} 章${chapter.title ? `《${chapter.title}》` : ""}`;
+    const text = type === "outline" ? `生成${chapterLabel}细纲` : `生成${chapterLabel}正文`;
+    const context = { entity_type: "chapter", entity_id: chapter.id };
+    useAssistantSession.getState().openAssistant();
+    useAssistantSession.getState().sendMessage(pid, text, context);
+  };
+
+  const handleUndo = async () => {
+    if (!selectedId) return;
+    await useAssistantSession.getState().undoAuto(pid, "chapter", selectedId);
+    setUndoable(false);
+  };
+
   return (
     <div className="flex h-full flex-col">
       <SectionTitle>章节</SectionTitle>
@@ -293,6 +331,8 @@ function ChapterPanel({ pid }: { pid: string }) {
               onAdd={handleAdd}
               onDelete={handleDelete}
               onMove={handleMove}
+              onGenerate={handleGenerate}
+              generating={generating}
             />
           )}
         </div>
@@ -307,7 +347,7 @@ function ChapterPanel({ pid }: { pid: string }) {
               <span className="text-sm text-muted">加载中…</span>
             </div>
           )}
-          <ChapterEditor chapter={selectedChapter} onSave={handleSave} />
+          <ChapterEditor chapter={selectedChapter} onSave={handleSave} onUndo={handleUndo} undoable={undoable} />
         </div>
       </div>
     </div>
