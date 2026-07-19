@@ -63,7 +63,7 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
     setError(null);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pid, config.kind]);
+  }, [pid, config.kind, api]);
 
   const selected = useMemo(
     () => items.find((it) => it.id === selectedId) || null,
@@ -82,7 +82,7 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
       setForm(next);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, creating]);
+  }, [selectedId, creating, selected]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -137,10 +137,11 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
     config.fields.forEach((f) => (payload[f.key] = form[f.key] ?? ""));
     try {
       if (creating) {
-        const { data } = await api.add({ ...payload, project_id: pid });
+        const res = await api.add({ ...payload, project_id: pid });
+        const created = res?.data ?? res;
         await load();
         setCreating(false);
-        if (data?.id) setSelectedId(data.id);
+        if (created?.id) setSelectedId(created.id);
       } else if (selectedId) {
         await api.upd(selectedId, payload);
         await load();
