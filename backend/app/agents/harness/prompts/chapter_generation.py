@@ -133,6 +133,7 @@ ${_json_rules}
 - action="update" 时必须提供 entity_id。
 - 不要修改已有章节的 content 或 detailed_outline。
 - 一个章节可包含多个剧情节点，按 order 排序。
+- 每章目标约 $target_words 字；按每 800-1000 字容纳一个剧情节点估算单章容量，单章节点过多时必须拆分到后续章节；已有章节容量不足时新建足量占位章节，避免一章剧情过密。
 
 输入数据：
 【剧情节点】
@@ -167,6 +168,7 @@ ${_json_rules}
 - detailed_outline 应包含：场景列表、本章目标、冲突、情感弧线、结尾钩子。
 - 保持与总纲、剧情节点、角色、世界观一致。
 - 参考前文摘要和活跃伏笔。
+- 本章目标约 $target_words 字，细纲场景规模应与之匹配（场景数约为目标字数/600）。
 
 输入数据：
 【目标章节】
@@ -213,9 +215,10 @@ ${_json_rules}
 
 业务规则：
 - entity_id 必须为目标章节 id（即下方【目标章节】的 id）。
-- content 为完整章节的正文字符串，可包含换行，但不要再嵌套 JSON 或 markdown 代码块。
 - 保持人物一致性、伏笔呼应、节奏连贯。
 - 如果【前文尾部】存在，请保持叙事衔接。
+- 本章目标约 $target_words 字（允许 ±20% 浮动）。
+- 正文将采用分段连续写作：每次调用只写一段，需与【上一段尾部】自然衔接（由用户消息提供）。
 
 输入数据：
 【目标章节】
@@ -235,6 +238,9 @@ $world
 
 【前文尾部】
 $previous_chapter_text_tail
+
+【前章摘要链】
+$previous_summaries
 
 【活跃伏笔】
 $active_foreshadows
@@ -312,11 +318,13 @@ def PLOT_NODES_PROMPT(
 def ASSIGNMENT_PROMPT(
     plot_nodes: list[dict],
     existing_chapters: list[dict],
+    target_words: int = 2500,
 ) -> str:
     return ASSIGNMENT_PROMPT_TEMPLATE.substitute(
         _json_rules=_JSON_RULES,
         plot_nodes=_dumps(plot_nodes),
         existing_chapters=_dumps(existing_chapters),
+        target_words=target_words,
     )
 
 
@@ -328,6 +336,7 @@ def CHAPTER_OUTLINE_PROMPT(
     world: list[dict],
     previous_chapter_summary: str,
     active_foreshadows: list[dict],
+    target_words: int = 2500,
 ) -> str:
     return CHAPTER_OUTLINE_PROMPT_TEMPLATE.substitute(
         _json_rules=_JSON_RULES,
@@ -338,6 +347,7 @@ def CHAPTER_OUTLINE_PROMPT(
         world=_dumps(world),
         previous_chapter_summary=previous_chapter_summary or "（无）",
         active_foreshadows=_dumps(active_foreshadows),
+        target_words=target_words,
     )
 
 
@@ -349,6 +359,8 @@ def CHAPTER_TEXT_PROMPT(
     world: list[dict],
     previous_chapter_text_tail: str,
     active_foreshadows: list[dict],
+    previous_summaries: str = "（无）",
+    target_words: int = 2500,
 ) -> str:
     return CHAPTER_TEXT_PROMPT_TEMPLATE.substitute(
         _json_rules=_JSON_RULES,
@@ -359,6 +371,8 @@ def CHAPTER_TEXT_PROMPT(
         world=_dumps(world),
         previous_chapter_text_tail=previous_chapter_text_tail or "（无）",
         active_foreshadows=_dumps(active_foreshadows),
+        previous_summaries=previous_summaries or "（无）",
+        target_words=target_words,
     )
 
 
@@ -409,6 +423,7 @@ def assignment_prompt(context: dict) -> str:
     return ASSIGNMENT_PROMPT(
         plot_nodes=context.get("plot_nodes") or [],
         existing_chapters=context.get("existing_chapters") or [],
+        target_words=context.get("target_words") or 2500,
     )
 
 
@@ -422,6 +437,7 @@ def chapter_outline_prompt(context: dict) -> str:
         world=context.get("world") or [],
         previous_chapter_summary=context.get("previous_chapter_summary", "") or "（无）",
         active_foreshadows=context.get("active_foreshadows") or [],
+        target_words=context.get("target_words") or 2500,
     )
 
 
@@ -435,6 +451,8 @@ def chapter_text_prompt(context: dict) -> str:
         world=context.get("world") or [],
         previous_chapter_text_tail=context.get("previous_chapter_text_tail", "") or "（无）",
         active_foreshadows=context.get("active_foreshadows") or [],
+        previous_summaries=context.get("previous_summaries", "") or "（无）",
+        target_words=context.get("target_words") or 2500,
     )
 
 
@@ -446,4 +464,74 @@ def chapter_review_prompt(context: dict) -> str:
         characters=context.get("characters") or [],
         world=context.get("world") or [],
         active_foreshadows=context.get("active_foreshadows") or [],
+    )
+
+
+RATING_LABELS = {"loose": "宽松", "standard": "标准", "strict": "严格"}
+
+CHAPTER_RATING_PROMPT_TEMPLATE = Template(
+    """你是网络小说内容尺度审校员。请按指定的尺度等级检查章节正文。
+
+${_json_rules}
+
+当前尺度等级：$rating_label
+- loose（宽松）：仅拦截违法与极端内容（未成年人相关内容、教唆犯罪等），其余放行。
+- standard（标准）：允许紧张暴力与含蓄亲密描写；不允许露骨性描写、细致酷刑与血腥渲染。
+- strict（严格）：不允许明确性描写与露骨血腥；亲密、暴力仅可暗示性带过。
+
+输出格式：
+- 若无问题：{"ok": true}
+- 若有问题：{"ok": false, "issues": [{"excerpt": "问题段落摘录（50字内）", "problem": "问题描述", "suggestion": "改写建议"}]}
+
+业务规则：
+- 只列出超出当前等级的内容，不要评论文风、逻辑或篇幅问题。
+- 拿不准的放行。
+
+【章节正文】
+$chapter_text
+"""
+)
+
+
+def CHAPTER_RATING_PROMPT(chapter_text: str, rating: str) -> str:
+    return CHAPTER_RATING_PROMPT_TEMPLATE.substitute(
+        _json_rules=_JSON_RULES,
+        rating_label=RATING_LABELS.get(rating, "标准"),
+        chapter_text=chapter_text,
+    )
+
+
+def chapter_rating_prompt(context: dict) -> str:
+    """根据 context 生成尺度审校 prompt。context 键：chapter_text、rating。"""
+    return CHAPTER_RATING_PROMPT(
+        chapter_text=context.get("chapter_text", "") or "",
+        rating=context.get("rating", "standard"),
+    )
+
+
+CHAPTER_SEGMENT_USER_TEMPLATE = Template(
+    """【写作进度】
+本章目标总字数：$target_words（允许 ±20% 浮动）
+已完成字数：$accumulated_words
+当前为第 $segment_index 段
+
+【上一段尾部】
+$prev_segment_tail
+
+请撰写下一段正文（800-1200 字），与上一段自然衔接；若本章细纲内容已全部写完，输出 finished=true。
+只输出 JSON：{"text": "本段正文", "finished": false}"""
+)
+
+
+def chapter_segment_user_prompt(
+    segment_index: int,
+    accumulated_words: int,
+    target_words: int,
+    prev_segment_tail: str,
+) -> str:
+    return CHAPTER_SEGMENT_USER_TEMPLATE.substitute(
+        segment_index=segment_index,
+        accumulated_words=accumulated_words,
+        target_words=target_words,
+        prev_segment_tail=prev_segment_tail or "（第一段，从头开始）",
     )
