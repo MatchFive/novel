@@ -411,6 +411,12 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
                 else:
                     before = None
                 await apply_change(db, effective_project_id, r.model_dump())
+            except Exception:
+                logger.exception("自动应用章节变更失败，降级为待确认")
+                await db.rollback()
+                staged_records.append(r)
+                continue
+            try:
                 db.add(LongChangeRecord(
                     project_id=effective_project_id,
                     entity_type="chapter",
@@ -421,17 +427,16 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
                     source="auto",
                 ))
                 await db.commit()
-                auto_applied.append({
-                    "change_id": r.id,
-                    "entity_id": r.entity_id,
-                    "entity_type": "chapter",
-                    "fields": list((r.after or {}).keys()),
-                    "notes": notes_by_stage.get(r.stage) or [],
-                })
             except Exception:
-                logger.exception("自动应用章节变更失败，降级为待确认")
+                logger.exception("自动应用审计记录写入失败（变更已应用）")
                 await db.rollback()
-                staged_records.append(r)
+            auto_applied.append({
+                "change_id": r.id,
+                "entity_id": r.entity_id,
+                "entity_type": "chapter",
+                "fields": list((r.after or {}).keys()),
+                "notes": notes_by_stage.get(r.stage) or [],
+            })
         else:
             staged_records.append(r)
 
@@ -452,6 +457,18 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             responder_llm, staged_records, user_input=user_input, history_context=history_context,
             context=context, worker_results=worker_results,
         )
+
+    if auto_applied:
+        chapter_titles = {c.get("id"): c.get("title") for c in (context.get("chapters") or [])} if not is_global else {}
+        field_labels = {"content": "正文", "detailed_outline": "细纲", "status": "状态"}
+        lines = ["", "---", "**已直接写入：**"]
+        for a in auto_applied:
+            label = "、".join(field_labels.get(f, f) for f in a["fields"] if f != "status")
+            title = chapter_titles.get(a["entity_id"]) or a["entity_id"]
+            lines.append(f"- 章节《{title}》的{label}已保存（可撤销）")
+            for n in a.get("notes", []):
+                lines.append(f"  - {n}")
+        summary += "\n".join(lines)
 
     records_data = [r.model_dump() for r in staged_records]
     assistant_msg_id = None
@@ -511,18 +528,6 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     except Exception:
         logger.exception("Failed to persist assistant message")
         await db.rollback()
-
-    if auto_applied:
-        chapter_titles = {c.get("id"): c.get("title") for c in (context.get("chapters") or [])} if not is_global else {}
-        field_labels = {"content": "正文", "detailed_outline": "细纲", "status": "状态"}
-        lines = ["", "---", "**已直接写入：**"]
-        for a in auto_applied:
-            label = "、".join(field_labels.get(f, f) for f in a["fields"] if f != "status")
-            title = chapter_titles.get(a["entity_id"]) or a["entity_id"]
-            lines.append(f"- 章节《{title}》的{label}已保存（可撤销）")
-            for n in a.get("notes", []):
-                lines.append(f"  - {n}")
-        summary += "\n".join(lines)
 
     return {
         "ok": True,
@@ -734,6 +739,8 @@ async def undo(body: dict, db: AsyncSession = Depends(get_db)):
     entity_id = body.get("entity_id")
     if not (project_id and entity_type and entity_id):
         raise ValidationError("project_id、entity_type、entity_id 必填")
+    if entity_type != "chapter":
+        return {"ok": False, "message": "仅支持撤销章节自动生成"}
     res = await db.execute(
         select(LongChangeRecord)
         .where(
@@ -758,12 +765,17 @@ async def undo(body: dict, db: AsyncSession = Depends(get_db)):
         current = {c.name: getattr(current_row, c.name) for c in current_row.__table__.columns}
     else:
         current = None
-    await apply_change(db, project_id, {
-        "entity_type": entity_type,
-        "action": "update",
-        "entity_id": entity_id,
-        "after": rec.before,
-    })
+    try:
+        await apply_change(db, project_id, {
+            "entity_type": entity_type,
+            "action": "update",
+            "entity_id": entity_id,
+            "after": rec.before,
+        })
+    except Exception as e:
+        logger.exception("撤销自动生成失败")
+        await db.rollback()
+        return {"ok": False, "message": f"撤销失败：{e}"}
     rec.source = "auto_undone"
     db.add(LongChangeRecord(
         project_id=project_id,
