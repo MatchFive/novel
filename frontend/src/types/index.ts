@@ -15,6 +15,7 @@ export interface ModelConfig {
   is_default: boolean;
   level?: string;
   embedding_model?: string;
+  embedding_dimension?: number;
 }
 
 export interface UserSettings {
@@ -24,6 +25,10 @@ export interface UserSettings {
   assistant_summary_threshold: number;
   assistant_max_summaries: number;
   assistant_summary_max_length: number;
+  assistant_history_recent_messages: number;
+  assistant_history_top_k: number;
+  content_rating: string;
+  chapter_target_words: number;
 }
 
 export interface AssistantSession {
