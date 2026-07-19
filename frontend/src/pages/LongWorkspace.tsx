@@ -218,9 +218,15 @@ function ChapterPanel({ pid }: { pid: string }) {
   useEffect(() => {
     setUndoable(false);
     if (!selectedId) return;
+    let cancelled = false;
     assistantApi.undoable(selectedId)
-      .then(({ data }) => setUndoable(!!data.undoable))
+      .then(({ data }) => {
+        if (!cancelled) setUndoable(!!data.undoable);
+      })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [selectedId, chaptersVersion]);
 
   useEffect(() => {
