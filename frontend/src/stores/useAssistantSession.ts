@@ -204,6 +204,20 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
           },
         };
       }
+      const applied = data.applied || [];
+      const merged = applied.filter((a: any) => a.merged_into).length;
+      const skipped = applied.filter((a: any) => a.skipped_duplicate).length;
+      if (merged > 0 || skipped > 0) {
+        const parts: string[] = [];
+        if (merged > 0) parts.push(`${merged} 条与现有条目同名，已合并更新`);
+        if (skipped > 0) parts.push(`${skipped} 条重复内容已跳过`);
+        messages.push({
+          id: `local-dedup-${Date.now()}`,
+          role: "assistant",
+          content: `去重处理：${parts.join("；")}。`,
+          created_at: new Date().toISOString(),
+        });
+      }
       // 如果是指定确认，移除对应记录；如果是全部确认，后端已清空
       const confirmedIds = changeIds
         ? new Set(changeIds)
