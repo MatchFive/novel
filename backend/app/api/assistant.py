@@ -9,9 +9,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, NotFoundError, ValidationError
-from app.core.llm_factory import get_llm_client
+from app.core.llm_factory import get_llm_client, get_embedding_client
 from app.database import get_db
-from app.models import AssistantSession, AssistantMessage, Project, UserSetting
+from app.models import AssistantSession, AssistantMessage, LongChangeRecord, Project, UserSetting
 from app.agents.harness.history import (
     build_history_context,
     build_messages,
@@ -19,15 +19,19 @@ from app.agents.harness.history import (
     summarize_messages,
     append_summary,
 )
+from app.agents.harness.retrieval import (
+    store_summary_embedding,
+    retrieve_similar_summaries,
+)
 from app.agents.harness.nodes.supervisor import run_supervisor
 from app.agents.harness.workers import (
     CharacterWorker, WorldWorker, OutlineWorker, PlotWorker, ForeshadowWorker,
     BroadOutlineWorker, PlotNodesWorker, AssignmentWorker, ChapterOutlineWorker, ChapterTextWorker,
 )
 from app.agents.harness.worker_base import run_worker
-from app.agents.harness.nodes.aggregator import aggregate
+from app.agents.harness.nodes.aggregator import aggregate, _WORKER_ENTITY
 from app.agents.harness.nodes.responder import respond, GLOBAL_RESPONDER_PROMPT
-from app.services.change_apply import _ENTITY_REPO, confirm_session, reject_session
+from app.services.change_apply import _ENTITY_REPO, apply_change, confirm_session, reject_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["assistant"])
@@ -82,6 +86,99 @@ async def _recursive_limit(db) -> int:
     return s.recursive_limit if s else 8
 
 
+def _decode_project_id(project_id: str | None) -> str | None:
+    """把前端 sentinel 'global' 转成 None，表示全局会话。"""
+    if project_id is None or project_id == "global":
+        return None
+    return project_id
+
+
+def _detect_compound_intent(user_input: str) -> dict | None:
+    """对常见复合意图做规则化兜底，避免 supervisor LLM 漏拆任务。"""
+    text = user_input.lower()
+    has_character = any(kw in text for kw in ("角色", "人物", "主角", "配角", "龙套", "npc", "性格", "能力", "关系", "命运"))
+    has_world = any(kw in text for kw in ("世界观", "设定", "规则", "体系", "境界", "力量", "信仰", "神格"))
+    has_outline = any(kw in text for kw in ("大纲", "总纲", "章节结构", "主线", "支线", "起承转合"))
+    has_plot = any(kw in text for kw in ("剧情", "桥段", "事件", "情节"))
+
+    tasks: list[dict] = []
+    if has_character:
+        tasks.append({"worker": "character", "goal": "为项目新增或调整角色（姓名、性格、能力、关系、地位等），不要修改大纲"})
+    if has_world:
+        tasks.append({"worker": "world", "goal": "为项目新增或调整世界观设定"})
+    if has_plot:
+        tasks.append({"worker": "plot", "goal": "为项目编排剧情节点/桥段/事件"})
+    if has_outline:
+        tasks.append({"worker": "outline", "goal": "根据用户指令完善或更新现有大纲，只修改大纲内容"})
+
+    if len(tasks) > 1:
+        return {"intent": user_input, "tasks": tasks}
+    return None
+
+
+# context 中实体键与 change entity_type 的映射
+_CONTEXT_ENTITY_KEYS = {
+    "character": "characters",
+    "outline": "outlines",
+    "plot": "plot",
+    "foreshadow": "foreshadows",
+    "world": "world",
+    "chapter": "chapters",
+}
+
+_CHAPTER_AUTO_FIELDS = {"content", "detailed_outline", "status"}
+
+
+def _is_chapter_auto_apply(record) -> bool:
+    """章节正文/细纲的 update 变更直接落库，不进待确认列表。"""
+    keys = set((record.after or {}).keys())
+    return (
+        record.entity_type == "chapter"
+        and record.action == "update"
+        and bool(record.entity_id)
+        and keys <= _CHAPTER_AUTO_FIELDS
+        and bool(keys & {"content", "detailed_outline"})
+    )
+
+
+def _apply_changes_to_context(context: dict, changes: list[dict], default_worker: str | None = None) -> None:
+    """把 worker 产出的 changes 临时合并进 context，供后续顺序执行的 worker 参考。
+
+    若 change 本身没有 entity_type，则按产出它的 worker 类型推断（与 aggregator 逻辑一致）。
+    """
+    for ch in changes:
+        if not isinstance(ch, dict):
+            continue
+        action = ch.get("action")
+        entity_type = ch.get("entity_type")
+        if entity_type is None and default_worker:
+            entity_type = _WORKER_ENTITY.get(default_worker, default_worker)
+        entity_id = ch.get("entity_id")
+        fields = ch.get("fields") or {}
+        context_key = _CONTEXT_ENTITY_KEYS.get(entity_type)
+        if not context_key:
+            continue
+
+        entities = context.get(context_key)
+        if entities is None:
+            context[context_key] = []
+            entities = context[context_key]
+
+        if action == "update" and entity_id:
+            for e in entities:
+                if e.get("id") == entity_id:
+                    e.update(fields)
+                    break
+        elif action == "add":
+            new_entity = dict(fields)
+            if entity_id:
+                new_entity["id"] = entity_id
+            else:
+                # 临时 id，避免后续 worker 引用时冲突
+                new_entity["id"] = f"pending_{entity_type}_{len(entities)}"
+            entities.append(new_entity)
+
+
 @router.post("/chat")
 async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     project_id = body.get("project_id")
@@ -124,18 +221,50 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
 
     recursive_limit = await _recursive_limit(db)
 
-    hist_res = await db.execute(
-        select(AssistantMessage)
-        .where(AssistantMessage.session_id == sess.id)
-        .order_by(AssistantMessage.created_at.asc())
-    )
-    historical_messages = hist_res.scalars().all()
-
     settings_row = (await db.execute(select(UserSetting))).scalars().first()
     settings_obj = settings_row or UserSetting()
 
-    # 历史上下文（摘要 + 最近消息），不含 system 与当前用户输入
-    history_context = build_history_context(sess, historical_messages[:-1], settings_obj)
+    # 加载当前会话全部消息 ID，切分「最近 N 条」与「更早消息」
+    ids_res = await db.execute(
+        select(AssistantMessage.id)
+        .where(AssistantMessage.session_id == sess.id)
+        .order_by(AssistantMessage.created_at.asc())
+    )
+    message_ids = [row[0] for row in ids_res.all()]
+    current_idx = len(message_ids) - 1  # 即刚保存的用户消息
+    recent_n = max(1, settings_obj.assistant_history_recent_messages or 20)
+    top_k = max(0, settings_obj.assistant_history_top_k or 5)
+    recent_ids = message_ids[max(0, current_idx - recent_n):current_idx]
+
+    recent_res = await db.execute(
+        select(AssistantMessage)
+        .where(AssistantMessage.id.in_(recent_ids))
+        .order_by(AssistantMessage.created_at.asc())
+    )
+    recent_messages = recent_res.scalars().all()
+
+    # 检索与当前输入相似的历史摘要（基于摘要 embedding）
+    retrieved_summaries: list[dict] = []
+    try:
+        embedding_client, dimension = await get_embedding_client(db)
+        query_vectors = await embedding_client.embed(
+            [user_input],
+            model=embedding_client.model,
+            dimensions=dimension if dimension > 0 else None,
+        )
+        query_vector = query_vectors[0]
+        if top_k > 0:
+            retrieved_summaries = await retrieve_similar_summaries(
+                db,
+                sess.id,
+                query_vector,
+                top_k,
+            )
+    except Exception:
+        logger.exception("Summary embedding retrieval failed, falling back to recent messages only")
+
+    # 历史上下文（摘要 + 相似检索摘要 + 最近消息），不含 system 与当前用户输入
+    history_context = build_history_context(sess, recent_messages, retrieved_summaries, settings_obj)
 
     if is_global:
         # 全局会话：不读取项目实体，supervisor 返回空 tasks，responder 直接回答
@@ -178,8 +307,10 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             "- world（世界观）：只要用户在新增/修改世界观、设定、力量体系、修炼境界、社会规则、"
             "历史背景、地理环境、种族、宗教、神话、盟约/契约/法则/禁令，或出现'世界观''设定''规则''体系'等词，"
             "就必须派给 world。此类指令绝不能派给 outline。\n"
-            "- character：用户明确提到角色、人物、主角、配角、性格、能力、关系、命运。\n"
-            "- outline：仅当用户明确提到传统大纲、章节结构、起承转合、主线/支线安排时才派给 outline。\n"
+            "- character：用户明确提到角色、人物、主角、配角、龙套、NPC、性格、能力、关系、命运。"
+            "配角/NPC/龙套都必须由 character worker 创建，绝不能由 outline worker 创建。\n"
+            "- outline：仅当用户明确提到传统大纲、章节结构、起承转合、主线/支线安排，或说'完善大纲/调整大纲/更新大纲'时才派给 outline。"
+            "outline worker 只修改大纲，不能创建或修改角色、世界观。\n"
             "- broad_outline：用户说“生成/重新生成总纲/项目大纲/整体大纲”时派给 broad_outline。\n"
             "- plot_nodes：用户说“生成剧情节点/桥段/关键事件”时派给 plot_nodes。\n"
             "- assignment：用户说“分配章节/把剧情节点分配到章节/把桥段分配到章节”时派给 assignment。\n"
@@ -187,6 +318,9 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             "- chapter_text：用户说“生成正文/写第 X 章/写正文”时派给 chapter_text。\n"
             "- plot：用户提到具体剧情、事件、桥段、时间线节点但不涉及分配时。\n"
             "- foreshadow：用户提到伏笔、悬念、回收/呼应。\n\n"
+            "复合意图处理（必须遵守）：若用户一条指令里同时涉及多个实体类型，必须拆分为多个 task，每个 task 只派给一个对应 worker。"
+            "例如同时涉及'角色'和'大纲'，就要分别派发 character 和 outline，不能只用 outline 去创建角色。"
+            "tasks 数组的顺序必须按依赖关系排列：先生成/修改前置实体（如角色），后基于这些实体完善下游内容（如大纲）。\n\n"
             "若指令涉及当前上下文中的 entity_type/entity_id，应优先派给对应 worker（如果 project_id 可用）。"
             f"{context_note}\n\n"
             "示例（只输出 JSON，不要解释）：\n"
@@ -203,21 +337,35 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             '用户：写第1章正文。\n'
             '输出：{"intent": "生成第1章正文", "tasks": [{"worker": "chapter_text", "goal": "生成第1章正文"}]}\n'
             '用户：主角性格应该更沉稳。\n'
-            '输出：{"intent": "调整主角性格", "tasks": [{"worker": "character", "goal": "调整主角性格，使其更沉稳"}]}\n\n'
+            '输出：{"intent": "调整主角性格", "tasks": [{"worker": "character", "goal": "调整主角性格，使其更沉稳"}]}\n'
+            '用户：加上一些配角，并完善大纲。\n'
+            '输出：{"intent": "新增配角并完善大纲", "tasks": [{"worker": "character", "goal": "为项目新增一批配角，包括姓名、年龄、身份、性格、与主角关系等"}, {"worker": "outline", "goal": "根据新增配角完善现有大纲"}]}\n'
+            '用户：加上一些配角，完善大纲。\n'
+            '输出：{"intent": "新增配角并完善大纲", "tasks": [{"worker": "character", "goal": "为项目新增一批配角"}, {"worker": "outline", "goal": "根据新增配角完善现有大纲"}]}\n\n'
             "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。"
         )
         supervisor_msgs = build_messages(
             supervisor_prompt,
-            sess,
-            historical_messages[:-1],
+            history_context,
             user_input,
-            settings_obj,
         )
         supervisor_llm = await get_llm_client(db, level="medium")
         plan = await run_supervisor(supervisor_llm, supervisor_msgs)
+
+        # 规则化兜底：若 supervisor 漏拆复合意图，用规则检测补充分拆
+        compound_plan = _detect_compound_intent(user_input)
+        if compound_plan is not None:
+            supervisor_tasks = {t.get("worker") for t in plan.get("tasks", [])}
+            compound_tasks = {t.get("worker") for t in compound_plan["tasks"]}
+            if not supervisor_tasks.issuperset(compound_tasks):
+                logger.warning("Supervisor missed compound intent, using rule-based plan: %s", compound_plan)
+                plan = compound_plan
+
     logger.warning("Assistant supervisor plan: %s", plan)
 
     # 3. 派发 Worker（仅通过只读工具取数，产出结构化结果，不落库）
+    # 按 supervisor 返回的顺序依次执行；前序 worker 的 changes 会回写 context，
+    # 使后序 worker 能看到前面生成的实体（如先创建配角，再完善大纲）。
     worker_results = []
     for task in plan.get("tasks", []):
         wname = task.get("worker")
@@ -235,13 +383,60 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         logger.warning("Worker %s result: %s", wname, result)
         worker_results.append(result)
 
+        # 把本次产出的 changes 临时合并到 context，供后续 worker 使用
+        changes = result.get("changes") or []
+        if isinstance(changes, list):
+            _apply_changes_to_context(context, changes, default_worker=wname)
+
     # 4. aggregator -> ChangeRecord[]
     records = aggregate(effective_project_id, worker_results)
     logger.warning("Aggregated change records: %s", [r.model_dump() for r in records])
 
-    # 5. 写入会话 staged_changes（仅引用，不落真实表）
+    # 5. 章节正文/细纲变更直接应用（source="auto"），其余进 staged_changes
+    notes_by_stage = {
+        res.get("stage"): res.get("notes")
+        for res in worker_results
+        if res.get("notes")
+    }
+    auto_applied: list[dict] = []
+    staged_records = []
+    for r in records:
+        if not is_global and _is_chapter_auto_apply(r):
+            try:
+                before_row = await repo.get_chapter(db, r.entity_id)
+                if isinstance(before_row, dict):
+                    before = dict(before_row)
+                elif before_row is not None:
+                    before = {c.name: getattr(before_row, c.name) for c in before_row.__table__.columns}
+                else:
+                    before = None
+                await apply_change(db, effective_project_id, r.model_dump())
+                db.add(LongChangeRecord(
+                    project_id=effective_project_id,
+                    entity_type="chapter",
+                    entity_id=r.entity_id,
+                    before=before,
+                    after=r.after,
+                    status="applied",
+                    source="auto",
+                ))
+                await db.commit()
+                auto_applied.append({
+                    "change_id": r.id,
+                    "entity_id": r.entity_id,
+                    "entity_type": "chapter",
+                    "fields": list((r.after or {}).keys()),
+                    "notes": notes_by_stage.get(r.stage) or [],
+                })
+            except Exception:
+                logger.exception("自动应用章节变更失败，降级为待确认")
+                await db.rollback()
+                staged_records.append(r)
+        else:
+            staged_records.append(r)
+
     staged = list(sess.staged_changes or [])
-    staged.extend([r.model_dump() for r in records])
+    staged.extend([r.model_dump() for r in staged_records])
     sess.staged_changes = staged
     await db.commit()
 
@@ -249,15 +444,16 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     responder_llm = await get_llm_client(db, level="low")
     if is_global:
         summary = await respond(
-            responder_llm, records, user_input=user_input, history_context=history_context,
+            responder_llm, staged_records, user_input=user_input, history_context=history_context,
             system_prompt=GLOBAL_RESPONDER_PROMPT,
         )
     else:
         summary = await respond(
-            responder_llm, records, user_input=user_input, history_context=history_context
+            responder_llm, staged_records, user_input=user_input, history_context=history_context,
+            context=context, worker_results=worker_results,
         )
 
-    records_data = [r.model_dump() for r in records]
+    records_data = [r.model_dump() for r in staged_records]
     assistant_msg_id = None
     try:
         assistant_msg = AssistantMessage(
@@ -295,9 +491,38 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             append_summary(sess, recent, summary_text, settings_obj)
             await db.commit()
             await db.refresh(sess)
+
+            # 为新生成的摘要生成并持久化 embedding
+            try:
+                embedding_client, dimension = await get_embedding_client(db)
+                latest_summary = (sess.summaries or [])[-1]
+                await store_summary_embedding(
+                    db,
+                    sess.id,
+                    latest_summary.get("turn_range", ""),
+                    latest_summary.get("summary", ""),
+                    embedding_client,
+                    embedding_client.model,
+                    dimension,
+                )
+                await db.commit()
+            except Exception:
+                logger.exception("Failed to store summary embedding")
     except Exception:
         logger.exception("Failed to persist assistant message")
         await db.rollback()
+
+    if auto_applied:
+        chapter_titles = {c.get("id"): c.get("title") for c in (context.get("chapters") or [])} if not is_global else {}
+        field_labels = {"content": "正文", "detailed_outline": "细纲", "status": "状态"}
+        lines = ["", "---", "**已直接写入：**"]
+        for a in auto_applied:
+            label = "、".join(field_labels.get(f, f) for f in a["fields"] if f != "status")
+            title = chapter_titles.get(a["entity_id"]) or a["entity_id"]
+            lines.append(f"- 章节《{title}》的{label}已保存（可撤销）")
+            for n in a.get("notes", []):
+                lines.append(f"  - {n}")
+        summary += "\n".join(lines)
 
     return {
         "ok": True,
@@ -305,35 +530,39 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         "message_id": assistant_msg_id,
         "intent": plan.get("intent"),
         "change_records": records_data,
+        "auto_applied": auto_applied,
         "summary": summary,
     }
 
 
 @router.get("/session/{project_id}")
 async def get_session(project_id: str, db: AsyncSession = Depends(get_db)):
-    sess = await _get_active_session(db, project_id)
+    pid = _decode_project_id(project_id)
+    sess = await _get_active_session(db, pid)
     return sess.to_dict()
 
 
 @router.post("/session/{project_id}")
 async def create_session(project_id: str, db: AsyncSession = Depends(get_db)):
-    proj = await db.get(Project, project_id)
-    if not proj:
-        raise NotFoundError("项目不存在")
+    pid = _decode_project_id(project_id)
+    if pid is not None:
+        proj = await db.get(Project, pid)
+        if not proj:
+            raise NotFoundError("项目不存在")
 
     # 旧 session 全部置 inactive
     await db.execute(
         update(AssistantSession)
-        .where(AssistantSession.project_id == project_id)
+        .where(AssistantSession.project_id == pid)
         .values(is_active=False)
     )
 
     count_res = await db.execute(
-        select(func.count()).where(AssistantSession.project_id == project_id)
+        select(func.count()).where(AssistantSession.project_id == pid)
     )
     count = count_res.scalar() or 0
     new_session = AssistantSession(
-        project_id=project_id,
+        project_id=pid,
         title=f"对话 {count + 1}",
         is_active=True,
         staged_changes=[],
@@ -348,9 +577,10 @@ async def create_session(project_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/sessions/{project_id}")
 async def list_sessions(project_id: str, db: AsyncSession = Depends(get_db)):
+    pid = _decode_project_id(project_id)
     res = await db.execute(
         select(AssistantSession)
-        .where(AssistantSession.project_id == project_id)
+        .where(AssistantSession.project_id == pid)
         .order_by(AssistantSession.updated_at.desc())
     )
     sessions = [s.to_dict() for s in res.scalars().all()]
@@ -375,7 +605,8 @@ async def switch_session(session_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/session/{project_id}/history")
 async def get_session_history(project_id: str, db: AsyncSession = Depends(get_db)):
-    sess = await _get_active_session(db, project_id)
+    pid = _decode_project_id(project_id)
+    sess = await _get_active_session(db, pid)
     res = await db.execute(
         select(AssistantMessage)
         .where(AssistantMessage.session_id == sess.id)
@@ -494,3 +725,69 @@ async def reject(body: dict, db: AsyncSession = Depends(get_db)):
     except Exception:
         logger.exception("Failed to mark latest assistant message status")
     return result
+
+
+@router.post("/undo")
+async def undo(body: dict, db: AsyncSession = Depends(get_db)):
+    project_id = body.get("project_id")
+    entity_type = body.get("entity_type")
+    entity_id = body.get("entity_id")
+    if not (project_id and entity_type and entity_id):
+        raise ValidationError("project_id、entity_type、entity_id 必填")
+    res = await db.execute(
+        select(LongChangeRecord)
+        .where(
+            LongChangeRecord.project_id == project_id,
+            LongChangeRecord.entity_type == entity_type,
+            LongChangeRecord.entity_id == entity_id,
+            LongChangeRecord.source == "auto",
+            LongChangeRecord.status == "applied",
+        )
+        .order_by(LongChangeRecord.created_at.desc())
+        .limit(1)
+    )
+    rec = res.scalars().first()
+    if not rec or not rec.before:
+        return {"ok": False, "message": "没有可撤销的自动生成"}
+
+    from app import repositories as repo
+    current_row = await repo.get_chapter(db, entity_id)
+    if isinstance(current_row, dict):
+        current = dict(current_row)
+    elif current_row is not None:
+        current = {c.name: getattr(current_row, c.name) for c in current_row.__table__.columns}
+    else:
+        current = None
+    await apply_change(db, project_id, {
+        "entity_type": entity_type,
+        "action": "update",
+        "entity_id": entity_id,
+        "after": rec.before,
+    })
+    rec.source = "auto_undone"
+    db.add(LongChangeRecord(
+        project_id=project_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        before=current,
+        after=rec.before,
+        status="applied",
+        source="undo",
+    ))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/undoable/{chapter_id}")
+async def undoable(chapter_id: str, db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(LongChangeRecord.id)
+        .where(
+            LongChangeRecord.entity_type == "chapter",
+            LongChangeRecord.entity_id == chapter_id,
+            LongChangeRecord.source == "auto",
+            LongChangeRecord.status == "applied",
+        )
+        .limit(1)
+    )
+    return {"undoable": res.scalars().first() is not None}
