@@ -12,6 +12,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     JSON,
@@ -61,6 +62,7 @@ class ModelConfig(Base):
     model = Column(String(128), nullable=False)
     level = Column(String(32), nullable=True, index=True)
     embedding_model = Column(String(128), nullable=True)
+    embedding_dimension = Column(Integer, default=1536)
     is_default = Column(Boolean, default=False)
 
     def to_dict(self, hide_key: bool = True) -> dict:
@@ -71,6 +73,7 @@ class ModelConfig(Base):
             "model": self.model,
             "level": self.level,
             "embedding_model": self.embedding_model,
+            "embedding_dimension": self.embedding_dimension,
             "is_default": self.is_default,
             **({} if hide_key else {"api_key": self.api_key}),
         }
@@ -86,6 +89,10 @@ class UserSetting(Base):
     assistant_summary_threshold = Column(Integer, default=20)
     assistant_max_summaries = Column(Integer, default=5)
     assistant_summary_max_length = Column(Integer, default=1000)
+    assistant_history_recent_messages = Column(Integer, default=20)
+    assistant_history_top_k = Column(Integer, default=5)
+    content_rating = Column(String(16), default="standard")
+    chapter_target_words = Column(Integer, default=2500)
 
     def to_dict(self) -> dict:
         return {
@@ -95,6 +102,10 @@ class UserSetting(Base):
             "assistant_summary_threshold": self.assistant_summary_threshold,
             "assistant_max_summaries": self.assistant_max_summaries,
             "assistant_summary_max_length": self.assistant_summary_max_length,
+            "assistant_history_recent_messages": self.assistant_history_recent_messages,
+            "assistant_history_top_k": self.assistant_history_top_k,
+            "content_rating": self.content_rating or "standard",
+            "chapter_target_words": self.chapter_target_words or 2500,
         }
 
 
@@ -132,6 +143,21 @@ class AssistantMessage(Base):
     role = Column(String(32), nullable=False)
     content = Column(Text, default="")
     metadata_ = Column("metadata", JSON, default=dict)
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+
+class AssistantSummaryEmbedding(Base):
+    """助手历史摘要的 embedding，用于按当前输入检索相关摘要。"""
+
+    __tablename__ = "assistant_summary_embeddings"
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    session_id = Column(CHAR(36), ForeignKey("assistant_sessions.id"), nullable=False, index=True)
+    turn_range = Column(String(32), nullable=False)
+    summary_text = Column(Text, nullable=False)
+    embedding = Column(LargeBinary, nullable=False)
+    model = Column(String(128), nullable=False)
+    dimension = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=_now, nullable=False)
 
 
@@ -218,6 +244,7 @@ class LongChangeRecord(Base):
     before = Column(JSON, default=None)
     after = Column(JSON, default=None)
     status = Column(Enum("staged", "applied", "rejected", name="cr_status"), default="staged")
+    source = Column(String(16), default="staged")
     created_at = Column(DateTime, default=_now)
 
 

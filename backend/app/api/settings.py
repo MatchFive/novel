@@ -55,6 +55,16 @@ async def update_user_settings(payload: UserSettingUpdate, db: AsyncSession = De
         s.assistant_max_summaries = max(0, payload.assistant_max_summaries)
     if payload.assistant_summary_max_length is not None:
         s.assistant_summary_max_length = max(100, payload.assistant_summary_max_length)
+    if payload.assistant_history_recent_messages is not None:
+        s.assistant_history_recent_messages = max(1, payload.assistant_history_recent_messages)
+    if payload.assistant_history_top_k is not None:
+        s.assistant_history_top_k = max(0, payload.assistant_history_top_k)
+    if payload.content_rating is not None:
+        if payload.content_rating not in ("loose", "standard", "strict"):
+            raise ValidationError("无效的尺度等级（可选：loose/standard/strict）")
+        s.content_rating = payload.content_rating
+    if payload.chapter_target_words is not None:
+        s.chapter_target_words = min(8000, max(1000, payload.chapter_target_words))
     await db.commit()
     await db.refresh(s)
     return s.to_dict()
@@ -85,7 +95,10 @@ async def create_model(payload: ModelConfigCreate, db: AsyncSession = Depends(ge
         for m in res.scalars().all():
             m.is_default = False
     await _ensure_level_unique(db, payload.level)
-    m = ModelConfig(**payload.model_dump())
+    data = payload.model_dump()
+    if data.get("embedding_dimension") is None:
+        data["embedding_dimension"] = 1536
+    m = ModelConfig(**data)
     db.add(m)
     await db.commit()
     await db.refresh(m)
@@ -103,6 +116,8 @@ async def update_model(model_id: str, payload: ModelConfigUpdate, db: AsyncSessi
         for other in res.scalars().all():
             if other.id != model_id:
                 other.is_default = False
+    if data.get("embedding_dimension") is None and "embedding_dimension" in data:
+        data["embedding_dimension"] = 1536
     await _ensure_level_unique(db, data.get("level"), exclude_id=model_id)
     for k, v in data.items():
         setattr(m, k, v)
