@@ -6,17 +6,23 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy import select
+
 from app import repositories as repo
-from app.agents.harness.context_builder import ContextBuilder
+from app.agents.harness.context_builder import ContextBuilder, build_entities_from_context
 from app.agents.harness.prompts.chapter_generation import (
     assignment_prompt,
     broad_outline_prompt,
     chapter_outline_prompt,
+    chapter_rating_prompt,
     chapter_review_prompt,
+    chapter_segment_user_prompt,
     chapter_text_prompt,
     plot_nodes_prompt,
+    RATING_LABELS,
 )
 from app.agents.harness.worker_base import WorkerBase
+from app.models import UserSetting
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +116,30 @@ def _assigned_plot_nodes(plot_nodes: list[dict], chapter_id: str | None) -> list
     return [p for p in plot_nodes if p.get("chapter_id") == chapter_id]
 
 
+async def _generation_settings(db) -> tuple[int, str]:
+    """读取生成相关用户设置：(每章目标字数, 尺度等级)。"""
+    res = await db.execute(select(UserSetting))
+    s = res.scalars().first()
+    target = s.chapter_target_words if s and s.chapter_target_words else 2500
+    rating = s.content_rating if s and s.content_rating else "standard"
+    return target, rating
+
+
+def _chapter_summaries_chain(chapter: dict, chapters: list[dict], limit: int = 2000) -> str:
+    """目标章节之前各章的一行摘要链（细纲优先，其次正文前 200 字），总量钳制 limit。"""
+    prev = [c for c in sorted(chapters, key=lambda c: c.get("order", 0))
+            if c.get("order", 0) < chapter.get("order", 0)]
+    lines = []
+    for c in prev:
+        text = (c.get("detailed_outline") or c.get("content") or "")[:200]
+        if text:
+            lines.append(f"第{c.get('order', 0) + 1}章《{c.get('title', '')}》：{text}")
+    chain = "\n".join(lines)
+    if not chain:
+        return "（无）"
+    return chain[-limit:] if len(chain) > limit else chain
+
+
 def _result_to_response(result: Any, stage: str) -> dict:
     """将 LLM 解析结果统一转换为 {changes, stage, error?}。"""
     if isinstance(result, dict) and "changes" in result:
@@ -119,18 +149,6 @@ def _result_to_response(result: Any, stage: str) -> dict:
         "stage": stage,
         "error": "无法解析 worker 输出",
         "raw": result,
-    }
-
-
-def _build_context_entities(context: dict) -> dict[str, list[dict]]:
-    """将 harness 传入的 context 映射为 ContextBuilder 期望的实体键。"""
-    return {
-        "character": context.get("characters") or [],
-        "outline": context.get("outlines") or [],
-        "plot": context.get("plot") or [],
-        "foreshadow": context.get("foreshadows") or [],
-        "world": context.get("world") or [],
-        "chapter": context.get("chapters") or [],
     }
 
 
@@ -167,9 +185,13 @@ class BroadOutlineWorker(WorkerBase):
         existing_outlines = await repo.list_outlines(self.db, project_id)
 
         related = ""
-        builder = ContextBuilder(self.db, self.llm, entities=_build_context_entities(context))
+        builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
         try:
-            related = await builder.build(goal, "outline")
+            related = await builder.build(
+                goal,
+                focus_entity_type="outline",
+                focus_entity_id=context.get("entity_id"),
+            )
         except Exception:
             logger.exception("ContextBuilder failed for broad_outline")
 
@@ -209,9 +231,13 @@ class PlotNodesWorker(WorkerBase):
         plot_nodes = await repo.list_plot(self.db, project_id)
 
         related = ""
-        builder = ContextBuilder(self.db, self.llm, entities=_build_context_entities(context))
+        builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
         try:
-            related = await builder.build(goal, "plot")
+            related = await builder.build(
+                goal,
+                focus_entity_type="plot",
+                focus_entity_id=context.get("entity_id"),
+            )
         except Exception:
             logger.exception("ContextBuilder failed for plot_nodes")
 
@@ -250,15 +276,21 @@ class AssignmentWorker(WorkerBase):
         chapters = await repo.list_chapters(self.db, project_id)
 
         related = ""
-        builder = ContextBuilder(self.db, self.llm, entities=_build_context_entities(context))
+        builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
         try:
-            related = await builder.build(goal, "chapter")
+            related = await builder.build(
+                goal,
+                focus_entity_type="chapter",
+                focus_entity_id=context.get("entity_id"),
+            )
         except Exception:
             logger.exception("ContextBuilder failed for assignment")
 
+        target_words, _rating = await _generation_settings(self.db)
         prompt_context = {
             "plot_nodes": plot_nodes,
             "existing_chapters": chapters,
+            "target_words": target_words,
         }
         system = assignment_prompt(prompt_context)
         user_prompt = _user_prompt(goal, related)
@@ -304,12 +336,17 @@ class ChapterOutlineWorker(WorkerBase):
         chapter_id = chapter.get("id")
 
         related = ""
-        builder = ContextBuilder(self.db, self.llm, entities=_build_context_entities(context))
+        builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
         try:
-            related = await builder.build(goal, "chapter")
+            related = await builder.build(
+                goal,
+                focus_entity_type="chapter",
+                focus_entity_id=context.get("entity_id"),
+            )
         except Exception:
             logger.exception("ContextBuilder failed for chapter_outline")
 
+        target_words, _rating = await _generation_settings(self.db)
         prev = _previous_chapter(chapter, chapters)
         prompt_context = {
             "chapter": chapter,
@@ -319,6 +356,7 @@ class ChapterOutlineWorker(WorkerBase):
             "world": world,
             "previous_chapter_summary": _previous_chapter_summary(prev),
             "active_foreshadows": _active_foreshadows(foreshadows),
+            "target_words": target_words,
         }
         system = chapter_outline_prompt(prompt_context)
         user_prompt = _user_prompt(goal, related)
@@ -349,11 +387,7 @@ class ChapterTextWorker(WorkerBase):
         chapter = _find_target_chapter(goal, context, chapters)
         if not chapter:
             if _parse_chapter_number(goal) is None:
-                return {
-                    "changes": [],
-                    "stage": "chapter_text",
-                    "error": "无法识别目标章节",
-                }
+                return {"changes": [], "stage": "chapter_text", "error": "无法识别目标章节"}
             return {"changes": [], "stage": "chapter_text", "error": "未找到目标章节"}
 
         plot_nodes = await repo.list_plot(self.db, project_id)
@@ -362,47 +396,94 @@ class ChapterTextWorker(WorkerBase):
         foreshadows = context.get("foreshadows") or []
         chapter_id = chapter.get("id")
 
+        target_words, rating = await _generation_settings(self.db)
+        notes: list[str] = []
+
         assigned = _assigned_plot_nodes(plot_nodes, chapter_id)
         prev = _previous_chapter(chapter, chapters)
         prev_tail = _previous_chapter_text_tail(prev)
         active = _active_foreshadows(foreshadows)
+        summaries_chain = _chapter_summaries_chain(chapter, chapters)
 
-        prompt_context = {
+        system = chapter_text_prompt({
             "chapter": chapter,
             "detailed_outline": chapter.get("detailed_outline", ""),
             "assigned_plot_nodes": assigned,
             "characters": characters,
             "world": world,
             "previous_chapter_text_tail": prev_tail,
+            "previous_summaries": summaries_chain,
             "active_foreshadows": active,
-        }
-        system = chapter_text_prompt(prompt_context)
-        user_prompt = _user_prompt(goal)
-        messages = [{"role": "system", "content": system}]
-        if history_context:
-            messages.extend(history_context)
-        messages.append({"role": "user", "content": user_prompt})
+            "target_words": target_words,
+        })
 
-        result = await self._generate_text(messages)
-        if not result:
-            return {"changes": [], "stage": "chapter_text", "error": "正文生成解析失败"}
-
-        review_issues = await self._review_text(result, chapter, characters, world, active)
-        if review_issues:
-            logger.warning("Chapter review issues: %s", review_issues)
-            retry_messages = [{"role": "system", "content": system}]
-            if history_context:
-                retry_messages.extend(history_context)
-            retry_user = (
-                f"{user_prompt}\n\n【审校反馈】\n"
-                + "\n".join(f"- {issue}" for issue in review_issues)
+        # —— 分段连续生成 ——
+        segments: list[str] = []
+        max_segments = target_words // 800 + 2
+        for i in range(1, max_segments + 1):
+            accumulated = sum(len(s) for s in segments)
+            if accumulated >= target_words:
+                break
+            user = chapter_segment_user_prompt(
+                segment_index=i,
+                accumulated_words=accumulated,
+                target_words=target_words,
+                prev_segment_tail=segments[-1][-300:] if segments else "",
             )
-            retry_messages.append({"role": "user", "content": retry_user})
-            result = await self._generate_text(retry_messages) or result
+            messages = [{"role": "system", "content": system}]
+            if history_context:
+                messages.extend(history_context)
+            messages.append({"role": "user", "content": user})
+            seg = await self._generate_segment(messages)
+            if seg is None:  # 单段失败重试一次
+                seg = await self._generate_segment(messages)
+            if seg is None:
+                notes.append(f"第 {i} 段生成失败，正文于约 {accumulated} 字处中断")
+                break
+            text = str(seg.get("text") or "").strip()
+            if not text:
+                break
+            segments.append(text)
+            if seg.get("finished"):
+                break
 
-        return _result_to_response(result, "chapter_text")
+        content = "\n\n".join(segments)
+        if not content:
+            return {"changes": [], "stage": "chapter_text", "error": "正文生成失败", "notes": notes}
 
-    async def _generate_text(self, messages: list[dict]) -> dict | None:
+        # —— 一致性审校：发现问题带反馈重写一次 ——
+        review_issues = await self._review_text(content, chapter, characters, world, active)
+        if review_issues:
+            rewritten = await self._rewrite_with_feedback(system, history_context, content, review_issues)
+            if rewritten:
+                content = rewritten
+            else:
+                notes.append("一致性审校发现问题但重写失败，已保留原文")
+
+        # —— 尺度检查 + 自动改写一次，改写后复核 ——
+        rating_issues = await self._rating_check(content, rating)
+        if rating_issues:
+            rewritten = await self._rewrite_with_feedback(system, history_context, content, rating_issues)
+            if rewritten:
+                content = rewritten
+                notes.append(f"已按「{RATING_LABELS.get(rating, '标准')}」尺度自动调整 {len(rating_issues)} 处")
+                remaining = await self._rating_check(content, rating)
+                if remaining:
+                    notes.append(f"尺度复核仍有 {len(remaining)} 处待人工确认：" + "；".join(remaining[:3]))
+            else:
+                notes.append(f"尺度检查发现 {len(rating_issues)} 处问题但改写失败，待人工确认")
+
+        return {
+            "changes": [{
+                "action": "update",
+                "entity_id": chapter_id,
+                "fields": {"content": content, "status": "generated"},
+            }],
+            "stage": "chapter_text",
+            "notes": notes,
+        }
+
+    async def _generate_segment(self, messages: list[dict]) -> dict | None:
         try:
             raw = await self.llm.parse_llm_json(messages)
             if isinstance(raw, dict):
@@ -413,31 +494,47 @@ class ChapterTextWorker(WorkerBase):
                 except Exception:
                     pass
         except Exception:
-            logger.exception("Chapter text generation failed")
+            logger.exception("Chapter segment generation failed")
+        return None
+
+    async def _rewrite_with_feedback(
+        self,
+        system: str,
+        history_context: list[dict] | None,
+        content: str,
+        issues: list[str],
+    ) -> str | None:
+        user = (
+            "【当前正文】\n" + content
+            + "\n\n【审校反馈】\n" + "\n".join(f"- {i}" for i in issues)
+            + "\n\n请根据反馈修改并输出完整正文。只输出 JSON：{\"text\": \"修改后的完整正文\"}"
+        )
+        messages = [{"role": "system", "content": system}]
+        if history_context:
+            messages.extend(history_context)
+        messages.append({"role": "user", "content": user})
+        seg = await self._generate_segment(messages)
+        if seg and seg.get("text"):
+            return str(seg["text"]).strip()
         return None
 
     async def _review_text(
         self,
-        text_result: dict,
+        content: str,
         chapter: dict,
         characters: list[dict],
         world: list[dict],
         active_foreshadows: list[dict],
     ) -> list[str]:
-        changes = text_result.get("changes") or []
-        if not changes:
-            return []
-        content = changes[0].get("fields", {}).get("content", "")
         if not content:
             return []
-        review_context = {
+        system = chapter_review_prompt({
             "chapter_text": content,
             "chapter": chapter,
             "characters": characters,
             "world": world,
             "active_foreshadows": active_foreshadows,
-        }
-        system = chapter_review_prompt(review_context)
+        })
         try:
             raw = await self.llm.parse_llm_json([{"role": "system", "content": system}])
             if isinstance(raw, dict):
@@ -449,4 +546,27 @@ class ChapterTextWorker(WorkerBase):
             return []
         except Exception:
             logger.exception("Chapter review failed")
+            return []
+
+    async def _rating_check(self, content: str, rating: str) -> list[str]:
+        if not content:
+            return []
+        system = chapter_rating_prompt({"chapter_text": content, "rating": rating})
+        try:
+            raw = await self.llm.parse_llm_json([{"role": "system", "content": system}])
+            if isinstance(raw, dict):
+                if raw.get("ok"):
+                    return []
+                issues = raw.get("issues")
+                if isinstance(issues, list):
+                    result = []
+                    for i in issues:
+                        if isinstance(i, dict):
+                            result.append(f"{i.get('problem', '')}（{str(i.get('excerpt', ''))[:50]}）")
+                        else:
+                            result.append(str(i))
+                    return result
+            return []
+        except Exception:
+            logger.exception("Chapter rating check failed")
             return []
