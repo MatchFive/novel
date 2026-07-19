@@ -20,9 +20,11 @@ export function useResizable({ initial, min, max, storageKey }: UseResizableOpti
       const raw = localStorage.getItem(storageKey);
       if (raw) {
         const parsed = JSON.parse(raw) as Size;
+        const vw = Math.min(max.width, window.innerWidth - 32);
+        const vh = Math.min(max.height, window.innerHeight - 32);
         return {
-          width: Math.max(min.width, Math.min(max.width, parsed.width)),
-          height: Math.max(min.height, Math.min(max.height, parsed.height)),
+          width: Math.max(min.width, Math.min(vw, parsed.width)),
+          height: Math.max(min.height, Math.min(vh, parsed.height)),
         };
       }
     } catch {
@@ -33,12 +35,19 @@ export function useResizable({ initial, min, max, storageKey }: UseResizableOpti
 
   const [isResizing, setIsResizing] = useState(false);
   const startRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (storageKey && typeof window !== "undefined") {
       localStorage.setItem(storageKey, JSON.stringify(size));
     }
   }, [size, storageKey]);
+
+  useEffect(() => {
+    return () => {
+      cleanupRef.current?.();
+    };
+  }, []);
 
   const startResize = useCallback((e: React.MouseEvent, direction: ResizeDirection = "se") => {
     e.preventDefault();
@@ -73,6 +82,12 @@ export function useResizable({ initial, min, max, storageKey }: UseResizableOpti
     const handleUp = () => {
       setIsResizing(false);
       startRef.current = null;
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      cleanupRef.current = null;
+    };
+
+    cleanupRef.current = () => {
       window.removeEventListener("mousemove", handleMove);
       window.removeEventListener("mouseup", handleUp);
     };
