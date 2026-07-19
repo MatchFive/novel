@@ -4,7 +4,8 @@ import { longApi } from "@/api/long";
 import { graphApi } from "@/api/graph";
 import { ChapterList } from "@/components/chapter/ChapterList";
 import { ChapterEditor } from "@/components/chapter/ChapterEditor";
-import { Button, Input, Textarea, Card, SectionTitle } from "@/components/ui";
+import { EntityWorkbench, type EntityWorkbenchConfig } from "@/components/EntityWorkbench";
+import { Button, Card, SectionTitle } from "@/components/ui";
 import type { Chapter } from "@/types";
 
 export default function LongWorkspace() {
@@ -33,19 +34,14 @@ export default function LongWorkspace() {
         ))}
       </aside>
       <div className="flex-1 overflow-auto p-8">
-        {tab === "outline" && <OutlinePanel pid={id!} />}
-        {tab === "character" && <CrudPanel pid={id!} kind="character" label="角色" fields={[
-          { key: "name", label: "名称" }, { key: "traits", label: "性格" }, { key: "ability", label: "能力" }, { key: "status", label: "状态" },
-        ]} />}
-        {tab === "foreshadow" && <CrudPanel pid={id!} kind="foreshadow" label="伏笔" fields={[
-          { key: "title", label: "标题" }, { key: "content", label: "内容" }, { key: "state", label: "状态(pending/revealed/abandoned)" },
-        ]} />}
-        {tab === "world" && <CrudPanel pid={id!} kind="world" label="世界观" fields={[
-          { key: "category", label: "分类" }, { key: "content", label: "内容" },
-        ]} />}
-        {tab === "plot" && <CrudPanel pid={id!} kind="plot" label="剧情节点" fields={[
-          { key: "title", label: "标题" }, { key: "summary", label: "概要" }, { key: "timeline_pos", label: "时间位置" },
-        ]} />}
+        {(tab === "outline" || tab === "character" || tab === "foreshadow" || tab === "world" || tab === "plot") && (
+          <EntityWorkbench
+            pid={id!}
+            config={WORKBENCH_CONFIGS[tab]}
+            api={KIND_API[tab]}
+            editorActions={tab === "outline" ? makeOutlineActions(id!) : undefined}
+          />
+        )}
         {tab === "chapter" && <ChapterPanel pid={id!} />}
         {tab === "graph" && <GraphPanel pid={id!} />}
       </div>
@@ -53,104 +49,100 @@ export default function LongWorkspace() {
   );
 }
 
-function OutlinePanel({ pid }: { pid: string }) {
-  const [items, setItems] = useState<any[]>([]);
-  const [title, setTitle] = useState("");
-  const [content, setContent] = useState("");
-
-  const load = async () => {
-    const { data } = await longApi.outlines(pid);
-    setItems(data);
-  };
-  useEffect(() => { load(); }, [pid]);
-
-  const add = async () => {
-    if (!title.trim()) return;
-    await longApi.addOutline({ project_id: pid, title, content });
-    setTitle(""); setContent(""); load();
-  };
-
-  return (
-    <div>
-      <SectionTitle>大纲树</SectionTitle>
-      <div className="mt-4 space-y-3">
-        {items.map((it) => (
-          <Card key={it.id} className="p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex-1">
-                <div className="text-sm font-medium text-ink">{it.title || "（无标题）"}</div>
-                <div className="mt-1 whitespace-pre-wrap text-sm text-muted">{it.content}</div>
-              </div>
-              <Button variant="ghost" onClick={() => { setTitle(it.title); setContent(it.content); }}>复制为新版</Button>
-              <Button variant="ghost" onClick={async () => { await longApi.deleteOutline(it.id); load(); }}>删</Button>
-            </div>
-          </Card>
-        ))}
-      </div>
-      <Card className="mt-4 space-y-3 p-4">
-        <Input placeholder="标题" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <Textarea placeholder="内容" rows={4} value={content} onChange={(e) => setContent(e.target.value)} />
-        <div><Button variant="primary" onClick={add}>+ 新增大纲</Button></div>
-      </Card>
-    </div>
-  );
-}
-
-const KIND_API: any = {
+const KIND_API: Record<string, any> = {
+  outline: { list: longApi.outlines, add: longApi.addOutline, upd: longApi.updateOutline, del: longApi.deleteOutline },
   character: { list: longApi.characters, add: longApi.addCharacter, upd: longApi.updateCharacter, del: longApi.deleteCharacter },
   foreshadow: { list: longApi.foreshadows, add: longApi.addForeshadow, upd: longApi.updateForeshadow, del: longApi.deleteForeshadow },
   world: { list: longApi.world, add: longApi.addWorld, upd: longApi.updateWorld, del: longApi.deleteWorld },
   plot: { list: longApi.plot, add: longApi.addPlot, upd: longApi.updatePlot, del: longApi.deletePlot },
 };
 
-function CrudPanel({ pid, kind, label, fields }: { pid: string; kind: string; label: string; fields: { key: string; label: string }[] }) {
-  const [items, setItems] = useState<any[]>([]);
-  const [form, setForm] = useState<Record<string, string>>({});
-  const api = KIND_API[kind];
+const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
+  outline: {
+    kind: "outline",
+    label: "大纲",
+    fields: [
+      { key: "title", label: "标题" },
+      { key: "content", label: "内容", multiline: true },
+    ],
+    titleOf: (it) => it.title || "（无标题）",
+    subtitleOf: (it) => (it.content || "").slice(0, 40),
+    searchKeys: ["title", "content"],
+    sortBy: (a, b) => (a.order || 0) - (b.order || 0),
+  },
+  character: {
+    kind: "character",
+    label: "角色",
+    fields: [
+      { key: "name", label: "名称" },
+      { key: "traits", label: "性格", multiline: true },
+      { key: "ability", label: "能力", multiline: true },
+      { key: "status", label: "状态" },
+    ],
+    titleOf: (it) => it.name || "（未命名）",
+    subtitleOf: (it) => (it.traits || "").slice(0, 30),
+    groupBy: (it) => it.status || "未知",
+    searchKeys: ["name", "traits"],
+  },
+  foreshadow: {
+    kind: "foreshadow",
+    label: "伏笔",
+    fields: [
+      { key: "title", label: "标题" },
+      { key: "content", label: "内容", multiline: true },
+      { key: "state", label: "状态", options: ["pending", "revealed", "abandoned"] },
+    ],
+    titleOf: (it) => it.title || "（无标题）",
+    subtitleOf: (it) => (it.content || "").slice(0, 30),
+    groupBy: (it) => it.state || "pending",
+    groupOrder: ["pending", "revealed", "abandoned"],
+    searchKeys: ["title", "content"],
+  },
+  world: {
+    kind: "world",
+    label: "世界观",
+    fields: [
+      { key: "category", label: "分类" },
+      { key: "content", label: "内容", multiline: true },
+    ],
+    titleOf: (it) => it.category || "未分类",
+    subtitleOf: (it) => (it.content || "").slice(0, 40),
+    groupBy: (it) => it.category || "未分类",
+    searchKeys: ["category", "content"],
+  },
+  plot: {
+    kind: "plot",
+    label: "剧情节点",
+    fields: [
+      { key: "title", label: "标题" },
+      { key: "summary", label: "概要", multiline: true },
+      { key: "timeline_pos", label: "时间位置" },
+    ],
+    titleOf: (it) => it.title || "（无标题）",
+    subtitleOf: (it) => (it.summary || "").slice(0, 30),
+    searchKeys: ["title", "summary"],
+    sortBy: (a, b) =>
+      String(a.timeline_pos || "").localeCompare(String(b.timeline_pos || ""), "zh") ||
+      (a.order || 0) - (b.order || 0),
+  },
+};
 
-  const load = async () => {
-    const { data } = await api.list(pid);
-    setItems(data);
-  };
-  useEffect(() => { load(); }, [pid, kind]);
-
-  const add = async () => {
-    const payload: any = { project_id: pid };
-    fields.forEach((f) => (payload[f.key] = form[f.key] || ""));
-    await api.add(payload);
-    setForm({}); load();
-  };
-
-  return (
-    <div>
-      <SectionTitle>{label}</SectionTitle>
-      <div className="mt-4 space-y-3">
-        {items.map((it) => (
-          <Card key={it.id} className="p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex-1 text-sm">
-                {fields.map((f) => (
-                  <div key={f.key} className="mt-1">
-                    <span className="text-muted">{f.label}：</span>
-                    <span className="whitespace-pre-wrap text-ink">{it[f.key] || "—"}</span>
-                  </div>
-                ))}
-              </div>
-              <Button variant="ghost" onClick={async () => { await api.del(it.id); load(); }}>删</Button>
-            </div>
-          </Card>
-        ))}
-      </div>
-      <Card className="mt-4 space-y-3 p-4">
-        {fields.map((f) => (
-          <div key={f.key}>
-            <label className="mb-1 block text-xs text-muted">{f.label}</label>
-            <Input value={form[f.key] || ""} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} />
-          </div>
-        ))}
-        <div><Button variant="primary" onClick={add}>+ 新增{label}</Button></div>
-      </Card>
-    </div>
+function makeOutlineActions(pid: string) {
+  return (item: any, reload: () => void) => (
+    <Button
+      variant="ghost"
+      onClick={async () => {
+        await longApi.addOutline({
+          project_id: pid,
+          title: item.title,
+          content: item.content,
+          version_chain: item.id,
+        });
+        reload();
+      }}
+    >
+      复制为新版
+    </Button>
   );
 }
 
