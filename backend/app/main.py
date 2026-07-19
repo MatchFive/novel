@@ -1,6 +1,7 @@
 """FastAPI 入口：SPA 静态托管 + 路由注册 + 生命周期。"""
 from __future__ import annotations
 
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -13,6 +14,8 @@ from app.config import settings
 from app.core.errors import register_exception_handlers
 from app.database import AsyncSessionLocal, create_all, dispose_engine
 from app.services.settings_seed import seed_default_models
+
+logger = logging.getLogger(__name__)
 
 
 def _register_routers(app: FastAPI) -> None:
@@ -51,9 +54,19 @@ def _mount_spa(app: FastAPI) -> None:
             return FileResponse(index)
 
 
+def _run_migrations() -> None:
+    """启动时运行幂等 schema 迁移（对旧库补列）；失败不阻断启动。"""
+    try:
+        from scripts.migrate import migrate
+        migrate()
+    except Exception:
+        logger.exception("Schema migration failed at startup")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await create_all()
+    _run_migrations()
     async with AsyncSessionLocal() as db:
         await seed_default_models(db)
     yield
