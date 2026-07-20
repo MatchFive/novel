@@ -25,7 +25,7 @@ from app.agents.harness.retrieval import (
 from app.agents.harness.nodes.supervisor import run_supervisor
 from app.agents.harness.workers import (
     CharacterWorker, WorldWorker, OutlineWorker, PlotWorker, ForeshadowWorker,
-    BroadOutlineWorker, PlotNodesWorker, AssignmentWorker, ChapterOutlineWorker, ChapterTextWorker,
+    OutlineSplitWorker, BroadOutlineWorker, PlotNodesWorker, AssignmentWorker, ChapterOutlineWorker, ChapterTextWorker,
 )
 from app.agents.harness.worker_base import run_worker
 from app.agents.harness.nodes.aggregator import aggregate, _WORKER_ENTITY
@@ -41,6 +41,7 @@ _WORKERS = {
     "outline": OutlineWorker,
     "plot": PlotWorker,
     "foreshadow": ForeshadowWorker,
+    "outline_split": OutlineSplitWorker,
     "broad_outline": BroadOutlineWorker,
     "plot_nodes": PlotNodesWorker,
     "assignment": AssignmentWorker,
@@ -297,7 +298,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         supervisor_prompt = (
             "你是小说创作助手的调度器。根据用户指令与项目现有数据，判断需要派发哪些专精 Worker 来处理。"
             "可选 Worker：character（角色设计/调整）、world（世界观设定）、outline（大纲生成/调整）、"
-            "plot（剧情节点编排）、foreshadow（伏笔埋设/回收）、"
+            "plot（剧情节点编排）、foreshadow（伏笔埋设/回收）、outline_split（拆分已有大纲为时期/卷）、"
             "broad_outline（项目级总纲生成/更新）、plot_nodes（从总纲抽取关键剧情节点）、"
             "assignment（把剧情节点分配到已有/新建章节）、chapter_outline（生成单个章节细纲）、"
             "chapter_text（生成单个章节正文）。请返回 JSON："
@@ -310,6 +311,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             "配角/NPC/龙套都必须由 character worker 创建，绝不能由 outline worker 创建。\n"
             "- outline：仅当用户明确提到传统大纲、章节结构、起承转合、主线/支线安排，或说'完善大纲/调整大纲/更新大纲'时才派给 outline。"
             "outline worker 只修改大纲，不能创建或修改角色、世界观。\n"
+            "- outline_split：用户说“拆分大纲/把这条大纲拆成几卷/拆成时期”等，且上下文提供了 entity_id 时，派给 outline_split。\n"
             "- broad_outline：用户说“生成/重新生成总纲/项目大纲/整体大纲”时派给 broad_outline。\n"
             "- plot_nodes：用户说“生成剧情节点/桥段/关键事件”时派给 plot_nodes。\n"
             "- assignment：用户说“分配章节/把剧情节点分配到章节/把桥段分配到章节”时派给 assignment。\n"
@@ -337,6 +339,8 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             '输出：{"intent": "生成第1章正文", "tasks": [{"worker": "chapter_text", "goal": "生成第1章正文"}]}\n'
             '用户：主角性格应该更沉稳。\n'
             '输出：{"intent": "调整主角性格", "tasks": [{"worker": "character", "goal": "调整主角性格，使其更沉稳"}]}\n'
+            '用户：把这条大纲拆成几卷。\n'
+            '输出：{"intent": "拆分大纲为卷", "tasks": [{"worker": "outline_split", "goal": "把当前大纲条目拆成时期/卷结构"}]}\n'
             '用户：加上一些配角，并完善大纲。\n'
             '输出：{"intent": "新增配角并完善大纲", "tasks": [{"worker": "character", "goal": "为项目新增一批配角，包括姓名、年龄、身份、性格、与主角关系等"}, {"worker": "outline", "goal": "根据新增配角完善现有大纲"}]}\n'
             '用户：加上一些配角，完善大纲。\n'
