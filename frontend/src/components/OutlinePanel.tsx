@@ -122,6 +122,7 @@ export function OutlinePanel({ pid }: { pid: string }) {
         project_id: pid,
         title: selected.title,
         content: selected.content,
+        type: selected.type,
         version_chain: selected.id,
       };
       const res = await longApi.addOutline(payload);
