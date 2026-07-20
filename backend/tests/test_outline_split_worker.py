@@ -204,7 +204,9 @@ def test_aggregate_preserves_temp_id():
     ]
     records = aggregate("p1", worker_results)
     assert len(records) == 2
+    assert records[0].entity_type == "outline"
     assert records[0].temp_id == "temp:period:0"
     assert records[0].after["parent_id"] == "broad-1"
+    assert records[1].entity_type == "outline"
     assert records[1].after["parent_id"] == "temp:period:0"
     assert records[1].temp_id is None

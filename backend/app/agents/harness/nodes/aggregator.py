@@ -13,6 +13,7 @@ _WORKER_ENTITY = {
     "world": "world",
     "outline": "outline",
     "broad_outline": "outline",
+    "outline_split": "outline",
     "plot": "plot",
     "plot_nodes": "plot",
     "foreshadow": "foreshadow",
