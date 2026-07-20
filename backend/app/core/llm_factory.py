@@ -39,6 +39,42 @@ async def get_default_llm_client(db: AsyncSession) -> LLMClient:
     return await get_llm_client(db, level=None)
 
 
+async def get_embedding_config(db: AsyncSession) -> tuple[str, str | None, str, int]:
+    """返回应使用的 embedding 配置：base_url, api_key, model_name, dimension。
+
+    选择顺序：
+    1. level="embedding" 的 ModelConfig（用其 model 作为 embedding 模型名）。
+    2. 全局默认 ModelConfig（用其 embedding_model，dimension 取 embedding_dimension）。
+    3. 回退到 .env 默认。
+    """
+    res = await db.execute(select(ModelConfig).where(ModelConfig.level == "embedding"))  # noqa: E712
+    cfg = res.scalars().first()
+    if cfg:
+        return (
+            cfg.base_url,
+            cfg.api_key or None,
+            cfg.model,
+            cfg.embedding_dimension or 1536,
+        )
+
+    res = await db.execute(select(ModelConfig).where(ModelConfig.is_default == True))  # noqa: E712
+    cfg = res.scalars().first()
+    if cfg and cfg.embedding_model:
+        return (
+            cfg.base_url,
+            cfg.api_key or None,
+            cfg.embedding_model,
+            cfg.embedding_dimension or 1536,
+        )
+
+    return (
+        settings.llm_base_url,
+        settings.llm_api_key or None,
+        settings.llm_embedding_model,
+        settings.llm_embedding_dimension,
+    )
+
+
 async def get_embedding_model_name(db: AsyncSession) -> str:
     """返回应使用的 embedding 模型名。
 
@@ -58,3 +94,13 @@ async def get_embedding_model_name(db: AsyncSession) -> str:
         return cfg.embedding_model
 
     return settings.llm_embedding_model
+
+
+async def get_embedding_client(db: AsyncSession) -> tuple[LLMClient, int]:
+    """返回已配置 embedding 模型名和维度的 LLMClient。"""
+    base_url, api_key, model_name, dimension = await get_embedding_config(db)
+    return LLMClient(
+        base_url=base_url or None,
+        api_key=api_key or None,
+        model=model_name,
+    ), dimension

@@ -134,6 +134,35 @@ class LLMClient:
         )
         return _extract_json(raw)
 
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        model: Optional[str] = None,
+        dimensions: Optional[int] = None,
+    ) -> list[list[float]]:
+        """调用 OpenAI 兼容 /embeddings 接口，返回与输入顺序对应的向量列表。"""
+        self._ensure_api_key()
+        payload: dict[str, Any] = {
+            "model": model or self.model,
+            "input": texts,
+        }
+        if dimensions is not None and dimensions > 0:
+            payload["dimensions"] = dimensions
+        async with httpx.AsyncClient(timeout=self.timeout + 60) as client:
+            try:
+                resp = await client.post(
+                    f"{self.base_url}/embeddings",
+                    headers=self._headers(),
+                    json=payload,
+                )
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                self._raise_llm_error(payload, exc)
+            data = resp.json().get("data", [])
+            data.sort(key=lambda x: x.get("index", 0))
+            return [item["embedding"] for item in data]
+
 
 def _extract_json(text: str) -> Any:
     text = text.strip()

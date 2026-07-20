@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.7
     llm_timeout: float = 120.0
     llm_embedding_model: str = "text-embedding-3-small"
+    llm_embedding_dimension: int = 1536
 
     # ---- Neo4j（可选镜像）----
     neo4j_uri: str = ""
