@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useAssistantSession } from "@/stores/useAssistantSession";
 import { Button, Input, Textarea, SectionTitle, Empty } from "@/components/ui";
 
 export interface FieldDef {
@@ -51,6 +52,7 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
+  const entitiesVersion = useAssistantSession((s) => s.entitiesVersion);
 
   const load = async () => {
     try {
@@ -70,6 +72,11 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid, config.kind, api]);
+
+  useEffect(() => {
+    if (entitiesVersion > 0) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entitiesVersion]);
 
   const selected = useMemo(
     () => items.find((it) => it.id === selectedId) || null,

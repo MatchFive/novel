@@ -11,6 +11,7 @@ interface AssistantSessionState {
   error: string | null;
   assistantOpen: boolean;
   chaptersVersion: number;
+  entitiesVersion: number;
   reset: () => void;
   loadHistory: (pid: string | null) => Promise<void>;
   loadSessions: (pid: string | null) => Promise<void>;
@@ -34,6 +35,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
   error: null,
   assistantOpen: false,
   chaptersVersion: 0,
+  entitiesVersion: 0,
 
   reset: () => {
     set({ sessionId: null, sessions: [], messages: [], pendingRecords: [], error: null, assistantOpen: false });
@@ -230,6 +232,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
       set({
         messages,
         pendingRecords: get().pendingRecords.filter((r) => !confirmedIds.has(r.id)),
+        entitiesVersion: get().entitiesVersion + 1,
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "应用失败" });

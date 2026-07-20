@@ -1,4 +1,4 @@
-import { ReactNode, ButtonHTMLAttributes } from "react";
+import { ReactNode, ButtonHTMLAttributes, useState } from "react";
 
 export function ConfirmDialog({
   open,
@@ -26,6 +26,49 @@ export function ConfirmDialog({
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel}>{cancelText}</Button>
           <Button variant="primary" onClick={onConfirm}>{confirmText}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function InputDialog({
+  open,
+  title,
+  message,
+  defaultValue = "",
+  onConfirm,
+  onCancel,
+  confirmText = "确定",
+  cancelText = "取消",
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  defaultValue?: string;
+  onConfirm: (value: string) => void;
+  onCancel: () => void;
+  confirmText?: string;
+  cancelText?: string;
+}) {
+  const [value, setValue] = useState(defaultValue);
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/50 p-4">
+      <div className="w-full max-w-sm rounded-lg border border-line bg-surface p-5 shadow-soft">
+        <div className="font-serif text-base font-medium text-ink">{title}</div>
+        <div className="mt-2 text-sm text-ink-soft">{message}</div>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onConfirm(value)}
+          className="mt-4 w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink outline-none focus:border-accent focus:ring-1 focus:ring-accent/30"
+          autoFocus
+        />
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel}>{cancelText}</Button>
+          <Button variant="primary" onClick={() => onConfirm(value)}>{confirmText}</Button>
         </div>
       </div>
     </div>

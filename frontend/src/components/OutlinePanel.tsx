@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Input, Textarea, SectionTitle, Empty } from "@/components/ui";
 import { useConfirm } from "@/hooks/useConfirm";
+import { usePrompt } from "@/hooks/usePrompt";
+import { useAssistantSession } from "@/stores/useAssistantSession";
 import { OutlineTree } from "./OutlineTree";
 import { longApi } from "@/api/long";
 import { OutlineNode, OutlineType, CreateOutlinePayload, UpdateOutlinePayload } from "@/types";
@@ -28,6 +30,8 @@ export function OutlinePanel({ pid }: { pid: string }) {
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
+  const { prompt, dialog: promptDialog } = usePrompt();
+  const entitiesVersion = useAssistantSession((s) => s.entitiesVersion);
 
   const load = async () => {
     const { data } = await longApi.outlines(pid);
@@ -35,6 +39,7 @@ export function OutlinePanel({ pid }: { pid: string }) {
   };
 
   useEffect(() => { load(); }, [pid]);
+  useEffect(() => { if (entitiesVersion > 0) load(); }, [entitiesVersion]);
 
   const tree = useMemo(() => buildTree(items), [items]);
   const selected = useMemo(() => items.find((i) => i.id === selectedId), [items, selectedId]);
@@ -106,12 +111,11 @@ export function OutlinePanel({ pid }: { pid: string }) {
 
   const handleSplit = async () => {
     if (!selectedId) return;
-    const msg = window.prompt("请输入拆分要求", `将《${selected?.title}》拆分为多卷`);
+    const msg = await prompt("AI 拆分", "请输入拆分要求", `将《${selected?.title}》拆分为多卷`);
     if (!msg) return;
+    setError(null);
     try {
-      await longApi.splitOutline(pid, selectedId, msg);
-      // AI 拆分进 staged_changes，提示用户去 assistant 面板确认
-      alert("拆分建议已生成，请打开右下角 AI 助手面板确认");
+      await useAssistantSession.getState().sendMessage(pid, msg, { entity_type: "outline", entity_id: selectedId });
     } catch (e) {
       setError(e instanceof Error ? e.message : "拆分失败");
     }
@@ -139,6 +143,7 @@ export function OutlinePanel({ pid }: { pid: string }) {
   return (
     <div className="flex h-full flex-col">
       {dialog}
+      {promptDialog}
       <SectionTitle>大纲树</SectionTitle>
       <div className="mt-4 flex h-0 flex-1 gap-4">
         <div className="flex w-80 shrink-0 flex-col border border-line bg-surface p-3">
