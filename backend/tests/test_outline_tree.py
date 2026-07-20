@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import pytest
 
+from fastapi.testclient import TestClient
 from app import repositories as repo
 from app.core.errors import AppError
 from app.database import AsyncSessionLocal, create_all, engine
+from app.main import app
 from app.models import AssistantSession, Project
 from app.services.change_apply import (
     _validate_outline_change,
@@ -337,3 +339,137 @@ async def test_confirm_session_reports_parent_failed_for_missing_temp():
 
         await db.refresh(sess)
         assert len(sess.staged_changes) == 1
+
+
+@pytest.mark.anyio
+async def test_api_period_without_parent_rejected():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+    with TestClient(app) as client:
+        resp = client.post("/api/long/outlines", json={"project_id": pid, "type": "period", "title": "无父时期"})
+    assert resp.status_code == 400
+    assert resp.json()["ok"] is False
+
+
+@pytest.mark.anyio
+async def test_api_volume_without_parent_rejected():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+    with TestClient(app) as client:
+        resp = client.post("/api/long/outlines", json={"project_id": pid, "type": "volume", "title": "无父卷"})
+    assert resp.status_code == 400
+    assert resp.json()["ok"] is False
+
+
+@pytest.mark.anyio
+async def test_api_volume_parent_must_be_period():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+        broad = await repo.create_outline(db, {"project_id": pid, "type": "broad", "title": "总纲"})
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/long/outlines",
+            json={"project_id": pid, "type": "volume", "parent_id": broad["id"], "title": "错挂卷"},
+        )
+    assert resp.status_code == 400
+    assert resp.json()["ok"] is False
+
+
+@pytest.mark.anyio
+async def test_api_parent_from_different_project_rejected():
+    async with AsyncSessionLocal() as db:
+        pid_a = await _make_project(db)
+        pid_b = await _make_project(db)
+        broad_in_a = await repo.create_outline(
+            db, {"project_id": pid_a, "type": "broad", "title": "A 项目总纲"}
+        )
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/long/outlines",
+            json={"project_id": pid_b, "type": "period", "parent_id": broad_in_a["id"], "title": "B 项目时期"},
+        )
+    assert resp.status_code == 400
+    assert resp.json()["ok"] is False
+
+
+@pytest.mark.anyio
+async def test_api_cyclic_hierarchy_rejected():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+        broad = await repo.create_outline(db, {"project_id": pid, "type": "broad", "title": "总纲"})
+        period = await repo.create_outline(
+            db,
+            {"project_id": pid, "type": "period", "parent_id": broad["id"], "title": "时期"},
+        )
+    with TestClient(app) as client:
+        resp = client.put(
+            f"/api/long/outlines/{broad['id']}",
+            json={"type": "volume", "parent_id": period["id"]},
+        )
+    assert resp.status_code == 400
+    assert resp.json()["ok"] is False
+
+
+@pytest.mark.anyio
+async def test_api_chapter_start_greater_than_end_rejected():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+        period = await repo.create_outline(db, {"project_id": pid, "type": "period", "title": "时期"})
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/long/outlines",
+            json={
+                "project_id": pid,
+                "type": "volume",
+                "parent_id": period["id"],
+                "title": "范围错误卷",
+                "chapter_start": 5,
+                "chapter_end": 3,
+            },
+        )
+    assert resp.status_code == 400
+    assert resp.json()["ok"] is False
+
+
+@pytest.mark.anyio
+async def test_api_non_volume_cannot_set_chapter_range():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/long/outlines",
+            json={
+                "project_id": pid,
+                "type": "broad",
+                "title": "越界总纲",
+                "chapter_start": 1,
+                "chapter_end": 5,
+            },
+        )
+    assert resp.status_code == 400
+    assert resp.json()["ok"] is False
+
+
+@pytest.mark.anyio
+async def test_api_valid_volume_accepted():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+        period = await repo.create_outline(db, {"project_id": pid, "type": "period", "title": "时期"})
+    with TestClient(app) as client:
+        resp = client.post(
+            "/api/long/outlines",
+            json={
+                "project_id": pid,
+                "type": "volume",
+                "parent_id": period["id"],
+                "title": "第一卷",
+                "chapter_start": 1,
+                "chapter_end": 10,
+            },
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["type"] == "volume"
+    assert body["chapter_start"] == 1
+    assert body["chapter_end"] == 10
+    assert body["parent_id"] == period["id"]
