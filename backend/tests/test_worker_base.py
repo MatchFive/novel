@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.agents.harness.context_builder import build_entities_from_context
 from app.agents.harness.workers import CharacterWorker
 
 
@@ -59,6 +60,7 @@ async def test_worker_parses_final_json_into_changes():
         {
             "action": "add",
             "entity_id": None,
+            "entity_type": "character",
             "fields": {"name": "刘修", "traits": "穿越者"},
         }
     ]
@@ -108,8 +110,13 @@ async def test_worker_uses_context_builder_when_project_id_present():
     assert "刘修" in user_msg
     MockBuilder.assert_called_once()
     _, kwargs = MockBuilder.call_args
-    assert kwargs.get("entities") is context
-    MockBuilder.return_value.build.assert_awaited_once_with("完善刘修的设定", "character")
+    # WIP：entities 经 build_entities_from_context 归一化为单数键
+    assert kwargs.get("entities") == build_entities_from_context(context)
+    MockBuilder.return_value.build.assert_awaited_once_with(
+        "完善刘修的设定",
+        focus_entity_type="character",
+        focus_entity_id=None,
+    )
 
 
 def test_parse_final_extracts_json_from_markdown_explanation():

@@ -1,14 +1,16 @@
-"""为 Worker 提供语义相关上下文检索。"""
+"""为 Worker 提供相关上下文检索。
+
+策略：结构/关系优先 > 名称/关键词匹配 > 向量语义兜底（预留）。
+不依赖额外的 LLM 调用做精选，减少每次 worker 请求的延迟和 token 消耗。
+"""
 from __future__ import annotations
 
-import json
 import logging
 import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories as repo
-from app.core.llm_client import LLMClient
 
 
 logger = logging.getLogger(__name__)
@@ -52,10 +54,35 @@ _ENTITY_CONFIG = {
         "label": "相关世界观",
         "fields": ["category", "content"],
     },
+    "chapter": {
+        "repo": repo.list_chapters,
+        "label": "相关章节",
+        "fields": ["title", "content", "detailed_outline"],
+    },
 }
 
-_COARSE_TOP_N = 15
 _SELECT_TOP_N = 5
+_RELATED_BOOST = 1000  # 确保通过显式关系召回的实体排在关键词召回之上
+
+# 兼容从 assistant.py 传下来的 context 键名（复数）与 _ENTITY_CONFIG 键名（单数）
+_ENTITY_KEY_ALIASES = {
+    "characters": "character",
+    "outlines": "outline",
+    "foreshadows": "foreshadow",
+    "chapters": "chapter",
+}
+
+
+def build_entities_from_context(context: dict) -> dict[str, list[dict]]:
+    """把 /chat 中组装的 context 映射为 ContextBuilder 期望的实体键。"""
+    return {
+        "character": context.get("characters") or [],
+        "outline": context.get("outlines") or [],
+        "plot": context.get("plot") or [],
+        "foreshadow": context.get("foreshadows") or [],
+        "world": context.get("world") or [],
+        "chapter": context.get("chapters") or [],
+    }
 
 
 def _extract_keywords(text: str) -> list[str]:
@@ -70,7 +97,7 @@ def _extract_keywords(text: str) -> list[str]:
             if len(t) > 1 and t not in _STOP_WORDS:
                 result.append(t)
             continue
-        # 中文：生成 1-gram、2-gram、3-gram，过滤停用字
+        # 中文：生成 2-gram、3-gram、1-gram，过滤停用字
         chars = [c for c in t if c not in _STOP_WORDS]
         for n in (2, 3, 1):
             for i in range(len(chars) - n + 1):
@@ -78,6 +105,17 @@ def _extract_keywords(text: str) -> list[str]:
                 if gram and gram not in _STOP_WORDS:
                     result.append(gram)
     return list(dict.fromkeys(result))
+
+
+def _entity_text(entity: dict) -> str:
+    """把实体的所有字符串字段拼成一段文本，用于子串匹配。"""
+    parts = []
+    for v in entity.values():
+        if isinstance(v, str):
+            parts.append(v)
+        elif isinstance(v, list):
+            parts.append(" ".join(str(x) for x in v))
+    return " ".join(parts)
 
 
 def _score_entity(entity: dict, keywords: list[str]) -> int:
@@ -99,15 +137,6 @@ def _score_entity(entity: dict, keywords: list[str]) -> int:
     return score
 
 
-def _coarse_filter(entities: list[dict], keywords: list[str], top_n: int) -> list[dict]:
-    if not keywords:
-        return entities[:top_n]
-    scored = [(e, _score_entity(e, keywords)) for e in entities]
-    scored.sort(key=lambda x: x[1], reverse=True)
-    selected = [e for e, s in scored if s > 0]
-    return selected[:top_n] if selected else entities[:top_n]
-
-
 def _format_entity(entity: dict, fields: list[str]) -> str:
     lines = [f"- [{entity.get('id')}]"]
     for field in fields:
@@ -121,31 +150,44 @@ class ContextBuilder:
     def __init__(
         self,
         db: AsyncSession,
-        llm: LLMClient,
+        llm=None,  # 保留参数以兼容旧调用；当前实现不再使用 LLM 精选
         entities: dict[str, list[dict]] | None = None,
     ):
         self.db = db
         self.llm = llm
-        self._entities = entities
+        self._entities = self._normalize_entities(entities) if entities is not None else None
+
+    @staticmethod
+    def _normalize_entities(entities: dict[str, list[dict]]) -> dict[str, list[dict]]:
+        """把复数键名（如 characters）归一化为 _ENTITY_CONFIG 使用的单数键名（character）。"""
+        normalized = dict(entities)
+        for plural, singular in _ENTITY_KEY_ALIASES.items():
+            if plural in normalized and singular not in normalized:
+                normalized[singular] = normalized[plural]
+        return normalized
 
     async def build(
         self,
         query: str,
         focus_entity_type: str | None = None,
+        focus_entity_id: str | None = None,
         project_id: str | None = None,
     ) -> str:
-        keywords = _extract_keywords(query)
-        candidates = await self._fetch_entities(keywords, project_id=project_id)
-
+        """基于显式关系、名称匹配和关键词评分生成相关上下文文本。"""
+        candidates = await self._fetch_entities(project_id=project_id)
         if not any(candidates.values()):
             return ""
 
-        selected = await self._select_relevant(query, focus_entity_type, candidates)
+        focus_type, focus_entity = self._resolve_focus(
+            query, focus_entity_type, focus_entity_id, candidates
+        )
+        related = self._expand_related(focus_type, focus_entity, candidates)
+
+        selected = self._select(query, candidates, related)
         return self._format(selected)
 
     async def _fetch_entities(
         self,
-        keywords: list[str],
         project_id: str | None = None,
     ) -> dict[str, list[dict]]:
         candidates: dict[str, list[dict]] = {}
@@ -157,114 +199,158 @@ class ContextBuilder:
                     entities = []
                 else:
                     entities = await config["repo"](self.db, project_id)
-            candidates[entity_type] = _coarse_filter(entities, keywords, _COARSE_TOP_N)
+            candidates[entity_type] = entities
         return candidates
 
-    async def _select_relevant(
+    def _resolve_focus(
         self,
         query: str,
         focus_entity_type: str | None,
+        focus_entity_id: str | None,
         candidates: dict[str, list[dict]],
+    ) -> tuple[str | None, dict | None]:
+        """确定当前任务聚焦的实体：优先 context 传入的 id，其次从 query 里提取名称。"""
+        # 1. 显式 focus_entity_id
+        if focus_entity_type and focus_entity_id:
+            for e in candidates.get(focus_entity_type, []):
+                if e.get("id") == focus_entity_id:
+                    return focus_entity_type, e
+
+        # 2. 从 query 中匹配实体名称/标题/分类
+        query_lower = query.lower()
+        for entity_type, entities in candidates.items():
+            for e in entities:
+                for key in ("name", "title", "category"):
+                    val = e.get(key)
+                    if val and str(val).lower() in query_lower:
+                        return entity_type, e
+        return None, None
+
+    def _expand_related(
+        self,
+        focus_type: str | None,
+        focus_entity: dict | None,
+        candidates: dict[str, list[dict]],
+    ) -> dict[str, set[str]]:
+        """根据项目实体间的显式关系，召回与 focus 实体相关的其他实体 id。"""
+        related: dict[str, set[str]] = {k: set() for k in _ENTITY_CONFIG}
+        if not focus_entity or not focus_type:
+            return related
+
+        focus_id = focus_entity.get("id")
+        focus_name = (
+            focus_entity.get("name")
+            or focus_entity.get("title")
+            or focus_entity.get("category", "")
+        )
+        focus_name_lower = focus_name.lower() if focus_name else ""
+
+        if focus_type == "character":
+            # 通过 relations 找到关联角色
+            for c in candidates.get("character", []):
+                if c.get("id") == focus_id:
+                    continue
+                for rel in c.get("relations") or []:
+                    target = rel.get("target")
+                    if target and (target == focus_id or str(target).lower() == focus_name_lower):
+                        related["character"].add(c.get("id"))
+            # 其他实体文本中提到该角色名称
+            self._add_by_text_match(candidates, related, focus_name_lower, exclude_type="character")
+
+        elif focus_type == "chapter":
+            chapter_id = focus_id
+            chapter_title_lower = focus_entity.get("title", "").lower()
+            # 剧情节点已分配到本章
+            for p in candidates.get("plot", []):
+                if p.get("chapter_id") == chapter_id:
+                    related["plot"].add(p.get("id"))
+            # 其他实体提到章节标题
+            self._add_by_text_match(
+                candidates, related, chapter_title_lower,
+                exclude_type="chapter", include_types={"character", "foreshadow", "outline", "world"}
+            )
+
+        elif focus_type == "plot":
+            # 所属章节
+            chapter_id = focus_entity.get("chapter_id")
+            if chapter_id:
+                related["chapter"].add(chapter_id)
+            plot_title_lower = focus_entity.get("title", "").lower()
+            self._add_by_text_match(
+                candidates, related, plot_title_lower,
+                exclude_type="plot", include_types={"character", "outline", "foreshadow", "chapter"}
+            )
+
+        elif focus_type == "foreshadow":
+            subplot_id = focus_entity.get("subplot_id")
+            if subplot_id:
+                for p in candidates.get("plot", []):
+                    if p.get("id") == subplot_id:
+                        related["plot"].add(subplot_id)
+            fs_title_lower = focus_entity.get("title", "").lower()
+            self._add_by_text_match(
+                candidates, related, fs_title_lower,
+                exclude_type="foreshadow", include_types={"plot", "outline", "chapter"}
+            )
+
+        elif focus_type == "outline":
+            outline_title_lower = focus_entity.get("title", "").lower()
+            self._add_by_text_match(
+                candidates, related, outline_title_lower,
+                exclude_type="outline", include_types={"plot", "chapter", "foreshadow"}
+            )
+
+        elif focus_type == "world":
+            category_lower = focus_entity.get("category", "").lower()
+            self._add_by_text_match(
+                candidates, related, category_lower,
+                exclude_type="world", include_types={"outline", "chapter", "plot", "character"}
+            )
+
+        return related
+
+    def _add_by_text_match(
+        self,
+        candidates: dict[str, list[dict]],
+        related: dict[str, set[str]],
+        needle: str,
+        exclude_type: str | None = None,
+        include_types: set[str] | None = None,
+    ) -> None:
+        """把文本中包含 needle 的实体加入 related。"""
+        if not needle:
+            return
+        for entity_type, entities in candidates.items():
+            if entity_type == exclude_type:
+                continue
+            if include_types is not None and entity_type not in include_types:
+                continue
+            for e in entities:
+                if needle in _entity_text(e).lower():
+                    related[entity_type].add(e.get("id"))
+
+    def _select(
+        self,
+        query: str,
+        candidates: dict[str, list[dict]],
+        related: dict[str, set[str]],
     ) -> dict[str, list[dict]]:
-        prompt = self._build_selection_prompt(query, focus_entity_type, candidates)
-        selected_ids: dict[str, list[str]] = {}
-        try:
-            resp = await self.llm.chat([{"role": "user", "content": prompt}])
-            selected_ids = self._parse_selection(resp)
-        except Exception:
-            logger.exception("ContextBuilder LLM selection failed, falling back to coarse filter")
-            selected_ids = {}
-
+        keywords = _extract_keywords(query)
         result: dict[str, list[dict]] = {}
-        for entity_type, config in _ENTITY_CONFIG.items():
-            entities = candidates.get(entity_type, [])
-            ids = selected_ids.get(entity_type, []) if isinstance(selected_ids, dict) else []
-            if not isinstance(ids, list):
-                ids = []
-            selected = [e for e in entities if e.get("id") in ids]
-            if not selected:
-                selected = entities[:_SELECT_TOP_N]
-            else:
-                selected = selected[:_SELECT_TOP_N]
-            result[entity_type] = selected
-        return result
-
-    def _build_selection_prompt(
-        self,
-        query: str,
-        focus_entity_type: str | None,
-        candidates: dict[str, list[dict]],
-    ) -> str:
-        lines = [
-            "你是小说创作助手的内容检索器。",
-            "",
-            f"用户目标：{query}",
-        ]
-        if focus_entity_type:
-            lines.append(f"当前关注实体类型：{focus_entity_type}")
-        lines.extend([
-            "",
-            "下面是从项目中粗筛出的候选条目，按类型分组，每条包含 id 和完整内容。",
-            f"请为每个实体类型选出与用户目标最相关的最多 {_SELECT_TOP_N} 个条目 id。",
-            "",
-            "相关标准：",
-            "- 用户目标中明确提到或可能引用该条目。",
-            "- 该条目的内容会影响当前变更决策。",
-            "- 保持世界观、角色关系、剧情逻辑一致需要参考该条目。",
-            "",
-            "返回严格 JSON，不要解释：",
-            "{",
-            '  "character": ["id1", "id2"],',
-            '  "outline": [],',
-            '  "plot": ["id3"],',
-            '  "foreshadow": [],',
-            '  "world": ["id4"]',
-            "}",
-        ])
-
-        for entity_type, config in _ENTITY_CONFIG.items():
+        for entity_type in _ENTITY_CONFIG:
             entities = candidates.get(entity_type, [])
             if not entities:
                 continue
-            lines.append("")
-            lines.append(f"【{entity_type}】")
+            related_ids = related.get(entity_type, set())
+            scored = []
             for e in entities:
-                lines.append(f"id: {e.get('id')}")
-                for field in config["fields"]:
-                    lines.append(f"{field}: {e.get(field, '')}")
-                lines.append("---")
-        return "\n".join(lines)
-
-    def _parse_selection(self, text: str) -> dict[str, list[str]]:
-        text = text.strip()
-        if "```" in text:
-            parts = text.split("```")
-            for part in parts[1:]:
-                block = part.strip()
-                if block.lower().startswith("json"):
-                    block = block[4:]
-                try:
-                    parsed = json.loads(block.strip())
-                    if isinstance(parsed, dict):
-                        return parsed
-                except Exception:
-                    continue
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            pass
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end > start:
-            try:
-                parsed = json.loads(text[start : end + 1])
-                if isinstance(parsed, dict):
-                    return parsed
-            except Exception:
-                pass
-        return {}
+                score = _score_entity(e, keywords)
+                if e.get("id") in related_ids:
+                    score += _RELATED_BOOST
+                scored.append((e, score))
+            scored.sort(key=lambda x: x[1], reverse=True)
+            result[entity_type] = [e for e, s in scored[:_SELECT_TOP_N] if s > 0]
+        return result
 
     def _format(self, selected: dict[str, list[dict]]) -> str:
         lines: list[str] = []

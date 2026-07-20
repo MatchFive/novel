@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from app.agents.harness.context_builder import ContextBuilder
+import json
+import logging
+
+from app.agents.harness.context_builder import ContextBuilder, build_entities_from_context
 from app.agents.harness.worker_base import WorkerBase
+from app.core.errors import AppError
 from app.core.llm_client import LLMClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from .chapter_workers import (
     AssignmentWorker,
@@ -33,8 +39,12 @@ class CharacterWorker(WorkerBase):
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
         related = ""
         if context.get("project_id"):
-            builder = ContextBuilder(self.db, self.llm, entities=context)
-            related = await builder.build(goal, "character")
+            builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
+            related = await builder.build(
+                goal,
+                focus_entity_type="character",
+                focus_entity_id=context.get("entity_id"),
+            )
 
         chars = context.get("characters") or []
         chars_desc = "\n".join(
@@ -52,10 +62,113 @@ class CharacterWorker(WorkerBase):
             "2. 只有 name 完全不存在于现有角色列表时，才返回 action='add'，entity_id=null。\n"
             "3. 不要创建与现有角色同名的重复角色。\n"
             "4. 参考【相关上下文】保持与现有设定一致。\n"
+            "5. 只返回角色本身的字段（name/traits/ability/status/relations/importance），"
+            "禁止返回 outline/world 等非角色字段，禁止修改大纲内容。\n"
             "若需调用工具进一步了解角色，请输出 TOOL_CALL:{\"name\":\"read_characters\",\"arguments\":{\"project_id\":\"...\"}}"
         )
         user_prompt = f"【现有角色】\n{chars_desc}\n\n【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
-        return await self._tool_loop(system, user_prompt, history_context=history_context)
+        raw = await self._tool_loop(system, user_prompt, history_context=history_context)
+
+        # 若 LLM 没按 JSON 输出，尝试用 json_object 模式二次转换
+        if isinstance(raw, dict) and "raw" in raw and isinstance(raw["raw"], str):
+            conversion_msgs = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是 JSON 转换器。把下面的角色设计输出转换为严格合法的 JSON，"
+                        '格式：{"changes":[{"action":"add|update","entity_id":null或id,"fields":'
+                        '{"name":"","traits":"","ability":"","status":"","relations":[],"importance":0}}]}\n\n'
+                        "只输出 JSON，不要 markdown 代码块，不要解释。只保留角色字段，忽略大纲更新。"
+                    ),
+                },
+                {"role": "user", "content": raw["raw"]},
+            ]
+            try:
+                converted = await self.llm.parse_llm_json(conversion_msgs)
+                if isinstance(converted, dict):
+                    raw = converted
+                elif isinstance(converted, list):
+                    raw = {"changes": converted}
+            except AppError:
+                # 配置类错误（如缺 API key）上抛，让接口返回明确错误
+                raise
+            except Exception:
+                logger.exception("CharacterWorker raw-to-json conversion failed")
+
+        return self._normalize_character_changes(raw, chars)
+
+    @staticmethod
+    def _normalize_character_changes(raw: dict, chars: list[dict]) -> dict:
+        """过滤非角色变更、修正 entity_id、统一 relations 格式。"""
+        import uuid
+
+        name_to_id = {c.get("name"): c.get("id") for c in chars if c.get("name")}
+        existing_ids = {c.get("id") for c in chars if c.get("id")}
+        character_field_keys = {"name", "traits", "ability", "status", "relations", "importance"}
+
+        def _looks_like_uuid(value: str) -> bool:
+            try:
+                uuid.UUID(str(value))
+                return True
+            except Exception:
+                return False
+
+        def _resolve_relation(rel: dict) -> dict | None:
+            if not isinstance(rel, dict):
+                return None
+            target_id = rel.get("target_id")
+            target_name = rel.get("target")
+            if not target_id and target_name:
+                target_id = name_to_id.get(target_name)
+            if not target_id and target_name and _looks_like_uuid(target_name):
+                target_id = target_name
+            relation_type = rel.get("relation_type") or rel.get("type") or "相关"
+            if not target_id:
+                return None
+            return {"target_id": str(target_id), "relation_type": str(relation_type)}
+
+        changes: list[dict] = []
+        for ch in raw.get("changes") or []:
+            if not isinstance(ch, dict):
+                continue
+            fields = ch.get("fields") or {}
+            if not fields:
+                continue
+            # 过滤掉非角色字段占主导的变更（如 outline 的 content 更新）
+            if not any(k in fields for k in character_field_keys):
+                logger.warning("CharacterWorker 返回非角色字段，已过滤: %s", ch)
+                continue
+
+            entity_id = ch.get("entity_id")
+            name = fields.get("name")
+            action = ch.get("action", "add")
+
+            # 若 name 已存在，强制改为 update 并使用现有 id
+            if name and name in name_to_id:
+                action = "update"
+                entity_id = name_to_id[name]
+
+            # 若 update 的 id 不在现有角色中，尝试按 name 匹配；仍匹配不到则视为新增
+            if action == "update" and entity_id and entity_id not in existing_ids:
+                entity_id = name_to_id.get(name) if name else None
+                if not entity_id:
+                    action = "add"
+
+            # 规范化 relations
+            relations = fields.get("relations")
+            if isinstance(relations, list):
+                fields["relations"] = [
+                    r for r in (_resolve_relation(rel) for rel in relations) if r
+                ]
+
+            changes.append({
+                "action": action,
+                "entity_id": entity_id,
+                "entity_type": "character",
+                "fields": fields,
+            })
+
+        return {"changes": changes, "stage": "character"}
 
 
 class WorldWorker(WorkerBase):
@@ -65,8 +178,12 @@ class WorldWorker(WorkerBase):
         related = ""
         project_id = context.get("project_id")
         if project_id:
-            builder = ContextBuilder(self.db, self.llm, entities=context)
-            related = await builder.build(goal, "world")
+            builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
+            related = await builder.build(
+                goal,
+                focus_entity_type="world",
+                focus_entity_id=context.get("entity_id"),
+            )
 
         worlds = context.get("world") or []
         worlds_desc = "\n".join(
@@ -94,21 +211,124 @@ class OutlineWorker(WorkerBase):
     worker_name = "outline"
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
+        project_id = context.get("project_id")
+        if not project_id:
+            return {"changes": [], "stage": "outline", "error": "缺少 project_id"}
+
+        from app import repositories as repo
+
+        existing_outlines = await repo.list_outlines(self.db, project_id)
+
         related = ""
-        if context.get("project_id"):
-            builder = ContextBuilder(self.db, self.llm, entities=context)
-            related = await builder.build(goal, "outline")
+        builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
+        try:
+            related = await builder.build(
+                goal,
+                focus_entity_type="outline",
+                focus_entity_id=context.get("entity_id"),
+            )
+        except Exception:
+            logger.exception("ContextBuilder failed for outline")
+
+        chars = context.get("characters") or []
+        chars_desc = "\n".join(
+            f"- {c.get('name')} (id={c.get('id')})"
+            for c in chars
+        ) or "暂无现有角色。"
 
         system = (
-            "你是大纲架构师。使用只读工具 read_outlines / read_outline / read_outline_prev_version "
-            "了解现有大纲与版本链，再产出新大纲修订。"
-            '返回 JSON：{"changes":[{"action":"add|update","entity_id":null或id,'
-            '"fields":{"title":"","content":"","parent_id":null}}]}。\n\n'
-            "参考【相关上下文】保持大纲与角色、剧情节点、伏笔、世界观一致。\n"
-            "若需调用工具，请输出 TOOL_CALL:{\"name\":\"read_outlines\",\"arguments\":{\"project_id\":\"...\"}}"
+            "你是大纲架构师。根据项目摘要、现有大纲、角色、世界观和剧情节点，生成或更新大纲。"
+            "必须以合法 JSON 返回，不要 markdown 代码块，不要解释：\n"
+            '{"changes":[{"action":"add|update","entity_id":null或id,"fields":{'
+            '"title":"","content":"","type":"主线|支线|卷章","parent_id":null}}]}\n\n'
+            "业务规则：\n"
+            "- 若用户目标涉及已有大纲，优先使用 action='update' 并填写其 id。\n"
+            "- content 应包含主线目标、核心冲突、关键转折、整体结构。\n"
+            "- 参考【现有角色】与【相关上下文】保持大纲与角色、世界观一致。\n"
+            "- 不要编造未在角色/世界观列表中出现的设定。\n"
+            "- 本 Worker 只修改大纲，绝不能创建新角色或修改角色实体；"
+            "若用户要求新增/修改角色，请在 content 中留白或提示用户由角色设计师处理。\n"
+            "- 严禁把角色/人物包装成大纲条目新增；type 不能是 '配角'/'角色'/'人物'/'主角'/'龙套'/'NPC'。\n"
+            "- 不要把为角色写的人物小传作为独立大纲节点返回。"
         )
-        user_prompt = f"【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
-        return await self._tool_loop(system, user_prompt, history_context=history_context)
+        user_prompt = (
+            f"【项目摘要】\n{context.get('project_summary') or '未提供'}\n\n"
+            f"【现有大纲】\n{json.dumps(existing_outlines, ensure_ascii=False, indent=2)}\n\n"
+            f"【现有角色】\n{chars_desc}\n\n"
+            f"【世界观】\n{json.dumps(context.get('world') or [], ensure_ascii=False, indent=2)}\n\n"
+            f"【剧情节点】\n{json.dumps(context.get('plot') or [], ensure_ascii=False, indent=2)}\n\n"
+            f"【相关上下文】\n{related or '（无）'}\n\n"
+            f"【用户目标】\n{goal}"
+        )
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_prompt},
+        ]
+        if history_context:
+            messages = history_context + messages
+
+        try:
+            result = await self.llm.parse_llm_json(messages)
+            changes = []
+            if isinstance(result, dict):
+                changes = result.get("changes", []) or []
+            elif isinstance(result, list):
+                changes = result
+            # 根据 entity_id 校正 entity_type，避免 outline worker 越权修改其他实体时类型错误
+            id_to_type = self._build_id_type_map(context)
+            for ch in changes:
+                eid = ch.get("entity_id")
+                if eid and eid in id_to_type:
+                    ch["entity_type"] = id_to_type[eid]
+
+            # 过滤掉把角色伪装成大纲条目的错误输出
+            character_names = {c.get("name") for c in chars if c.get("name")}
+            filtered_changes: list[dict] = []
+            for ch in changes:
+                if ch.get("action") != "add":
+                    filtered_changes.append(ch)
+                    continue
+                fields = ch.get("fields") or {}
+                title = fields.get("title") or ""
+                ctype = fields.get("type") or ""
+                # 角色类字段或类型说明这实际上是在创建角色/人物，而不是大纲节点
+                if (
+                    title in character_names
+                    or ctype in {"配角", "角色", "人物", "主角", "龙套", "NPC"}
+                    or any(k in fields for k in ("traits", "ability", "status", "relations", "importance"))
+                ):
+                    logger.warning(
+                        "OutlineWorker 试图把角色 '%s' 伪装成大纲条目(type=%s)，已过滤",
+                        title,
+                        ctype,
+                    )
+                    continue
+                filtered_changes.append(ch)
+
+            return {"changes": filtered_changes, "stage": "outline"}
+        except AppError:
+            raise
+        except Exception:
+            logger.exception("OutlineWorker JSON parsing failed")
+        return {"changes": [], "stage": "outline", "error": "无法解析 worker 输出"}
+
+    @staticmethod
+    def _build_id_type_map(context: dict) -> dict[str, str]:
+        """根据 context 中的实体列表构建 id -> entity_type 映射。"""
+        mapping: dict[str, str] = {}
+        for entity_type, key in [
+            ("character", "characters"),
+            ("outline", "outlines"),
+            ("world", "world"),
+            ("plot", "plot"),
+            ("foreshadow", "foreshadows"),
+            ("chapter", "chapters"),
+        ]:
+            for e in context.get(key) or []:
+                eid = e.get("id")
+                if eid:
+                    mapping[str(eid)] = entity_type
+        return mapping
 
 
 class PlotWorker(WorkerBase):
@@ -117,8 +337,12 @@ class PlotWorker(WorkerBase):
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
         related = ""
         if context.get("project_id"):
-            builder = ContextBuilder(self.db, self.llm, entities=context)
-            related = await builder.build(goal, "plot")
+            builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
+            related = await builder.build(
+                goal,
+                focus_entity_type="plot",
+                focus_entity_id=context.get("entity_id"),
+            )
 
         system = (
             "你是剧情节点编排师。使用只读工具 read_plot_nodes / read_outlines 取数，"
@@ -137,8 +361,12 @@ class ForeshadowWorker(WorkerBase):
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
         related = ""
         if context.get("project_id"):
-            builder = ContextBuilder(self.db, self.llm, entities=context)
-            related = await builder.build(goal, "foreshadow")
+            builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
+            related = await builder.build(
+                goal,
+                focus_entity_type="foreshadow",
+                focus_entity_id=context.get("entity_id"),
+            )
 
         system = (
             "你是伏笔设计师。使用只读工具 read_foreshadows / read_plot_nodes 取数，"

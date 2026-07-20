@@ -11,10 +11,11 @@ def _max_summaries(settings: UserSetting) -> int:
 
 def build_history_context(
     session: AssistantSession,
-    messages: list[AssistantMessage],
+    recent_messages: list[AssistantMessage],
+    retrieved_summaries: list[dict],
     settings: UserSetting,
 ) -> list[dict[str, str]]:
-    """返回历史摘要 + 最近具体消息（不含 system prompt 与当前输入）。"""
+    """返回历史摘要 + 相似检索到的历史摘要 + 最近具体消息（不含 system prompt 与当前输入）。"""
     out: list[dict[str, str]] = []
 
     max_summaries = _max_summaries(settings)
@@ -28,25 +29,32 @@ def build_history_context(
             "content": f"[历史摘要 {i + 1}（{s.get('turn_range', '未知范围')}）]\n{s.get('summary', '')}",
         })
 
-    recent_count = _recent_message_count(session, settings)
-    recent = messages[-recent_count:] if recent_count > 0 else []
-    for m in recent:
-        out.append({"role": m.role, "content": m.content})
+    if retrieved_summaries:
+        out.append({
+            "role": "user",
+            "content": "[以下是与当前问题相关的历史摘要]",
+        })
+        for s in retrieved_summaries:
+            out.append({
+                "role": "user",
+                "content": f"（{s.get('turn_range', '未知范围')}）\n{s.get('summary_text', '')}",
+            })
+
+    for m in recent_messages:
+        out.append({"role": m.role, "content": m.content or ""})
 
     return out
 
 
 def build_messages(
     system_prompt: str,
-    session: AssistantSession,
-    messages: list[AssistantMessage],
+    history_context: list[dict[str, str]],
     user_input: str,
-    settings: UserSetting,
 ) -> list[dict[str, str]]:
     """为 LLM 组装完整 messages：system + 历史上下文 + 当前输入。"""
     return [
         {"role": "system", "content": system_prompt},
-        *build_history_context(session, messages, settings),
+        *history_context,
         {"role": "user", "content": user_input},
     ]
 
@@ -109,3 +117,31 @@ def append_summary(
         return
     session.summaries = summaries[-max_summaries:]
     session.message_count = 0
+
+
+def parse_summary_ranges(message_ids: list[str], summaries: list[dict]) -> list[tuple[int, int]]:
+    """把 session.summaries 里的 turn_range 转成 message_ids 中的 0-based 闭区间。"""
+    ranges: list[tuple[int, int]] = []
+    total = len(message_ids)
+    for s in summaries or []:
+        start, end = _parse_turn_range(s.get("turn_range", ""))
+        # 摘要里的轮数对应消息索引；超出当前消息总数的按当前总数截断
+        if start >= total:
+            continue
+        end = min(end, total - 1)
+        if start <= end:
+            ranges.append((start, end))
+    return ranges
+
+
+def _parse_turn_range(range_str: str) -> tuple[int, int]:
+    """把 '1-10' 解析为 0-based 的 (start, end) 闭区间。"""
+    try:
+        parts = str(range_str).split("-")
+        if len(parts) != 2:
+            return (-1, -1)
+        start = max(0, int(parts[0]) - 1)
+        end = max(0, int(parts[1]) - 1)
+        return (start, end)
+    except Exception:
+        return (-1, -1)

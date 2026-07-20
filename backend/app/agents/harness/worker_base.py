@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools import call_tool, tool_schemas
 from app.config import settings as app_settings
+from app.core.errors import AppError
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,21 @@ class WorkerBase:
             if not tool_call:
                 # 没有进一步工具调用 -> 视为最终产出
                 parsed = self._parse_final(resp)
+                # 若最终输出不是合法结构化结果，尝试用 json_object 模式强制 JSON
+                if not self._is_structured(parsed):
+                    try:
+                        forced = await self.llm.parse_llm_json(messages)
+                        if isinstance(forced, dict):
+                            parsed = forced
+                        elif isinstance(forced, list):
+                            parsed = {"changes": forced}
+                        else:
+                            parsed = self._parse_final(str(forced))
+                    except AppError:
+                        # 配置类错误（如缺 API key）必须上抛，不能吞成"解析失败"
+                        raise
+                    except Exception:
+                        pass
                 logger.warning("[%s] parsed final: %s", self.worker_name, parsed)
                 return parsed
             name = tool_call.get("name")
@@ -71,6 +87,19 @@ class WorkerBase:
         final = await self.llm.chat(messages)
         logger.warning("[%s] final LLM resp: %s", self.worker_name, final[:500])
         parsed = self._parse_final(final)
+        if not self._is_structured(parsed):
+            try:
+                forced = await self.llm.parse_llm_json(messages)
+                if isinstance(forced, dict):
+                    parsed = forced
+                elif isinstance(forced, list):
+                    parsed = {"changes": forced}
+                else:
+                    parsed = self._parse_final(str(forced))
+            except AppError:
+                raise
+            except Exception:
+                pass
         logger.warning("[%s] parsed final: %s", self.worker_name, parsed)
         return parsed
 
@@ -129,6 +158,16 @@ class WorkerBase:
                         return result
 
         return {"raw": text}
+
+    @staticmethod
+    def _is_structured(parsed: dict) -> bool:
+        """判断 _parse_final 的结果是否为合法结构化产出（而非 fallback 的 raw 文本）。"""
+        if not isinstance(parsed, dict):
+            return False
+        # 包含 changes 或其他结构化字段即视为合法
+        if "changes" in parsed or "action" in parsed:
+            return True
+        return False
 
 
 async def run_worker(
