@@ -83,6 +83,22 @@ async def test_volume_requires_period_parent():
 
 
 @pytest.mark.anyio
+async def test_parent_from_different_project_rejected():
+    async with AsyncSessionLocal() as db:
+        pid_a = await _make_project(db)
+        pid_b = await _make_project(db)
+        broad_in_a = await repo.create_outline(
+            db, {"project_id": pid_a, "type": "broad", "title": "A 项目总纲"}
+        )
+        with pytest.raises(AppError) as exc:
+            await _validate_outline_change(
+                db, pid_b, "add", None, {"type": "period", "parent_id": broad_in_a["id"]}
+            )
+        assert exc.value.code == "INVALID_HIERARCHY"
+        assert "父节点不属于当前项目" in exc.value.message
+
+
+@pytest.mark.anyio
 async def test_period_parent_must_be_broad():
     async with AsyncSessionLocal() as db:
         pid = await _make_project(db)
