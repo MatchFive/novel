@@ -23,15 +23,9 @@ ${_json_rules}
 输出格式：
 {
   "changes": [
-    {
-      "action": "add|update",
-      "entity_id": null或已有id,
-      "fields": {
-        "title": "总纲标题",
-        "content": "总纲正文",
-        "type": "broad"
-      }
-    }
+    {"action": "add|update", "entity_id": null或id, "temp_id": "temp:broad:1", "fields": {"title": "总纲标题", "content": "总纲正文", "type": "broad"}},
+    {"action": "add", "temp_id": "temp:period:1", "fields": {"title": "时期标题", "content": "时期概述", "type": "period", "parent_id": "temp:broad:1"}},
+    {"action": "add", "fields": {"title": "卷标题", "content": "卷内容", "type": "volume", "parent_id": "temp:period:1", "chapter_start": 1, "chapter_end": 10}}
   ]
 }
 
@@ -39,6 +33,8 @@ ${_json_rules}
 - 若已有大纲中存在 type="broad" 的条目，应优先使用 action="update" 并填写其 id。
 - content 应包含主线目标、核心冲突、关键转折、整体结构，300-800字。
 - title 简洁，概括项目核心。
+- 时期节点使用 type="period"，parent_id 指向总纲的 temp_id 或已有总纲 id。
+- 卷节点使用 type="volume"，parent_id 指向所属时期的 temp_id 或已有时期 id，并填写 chapter_start/chapter_end（1-based，可为 null）。
 
 输入数据：
 【项目摘要】
