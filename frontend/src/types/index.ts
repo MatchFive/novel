@@ -71,6 +71,34 @@ export interface Chapter {
   status?: string;
 }
 
+export type OutlineType = "broad" | "period" | "volume";
+
+export interface OutlinePayload {
+  project_id?: string;
+  title?: string;
+  content?: string;
+  type?: OutlineType;
+  parent_id?: string | null;
+  order?: number;
+  chapter_start?: number | null;
+  chapter_end?: number | null;
+  version_chain?: string | null;
+}
+
+export interface OutlineNode {
+  id: string;
+  project_id: string;
+  parent_id: string | null;
+  type: OutlineType;
+  title: string;
+  content: string;
+  order: number;
+  chapter_start?: number | null;
+  chapter_end?: number | null;
+  version_chain?: string | null;
+  children?: OutlineNode[];
+}
+
 export interface AssistantMessage {
   id: string;
   role: "user" | "assistant" | "system";
