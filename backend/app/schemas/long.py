@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Any
+from typing import Literal, Optional, Any
 from pydantic import BaseModel, Field
 
 
@@ -8,14 +8,20 @@ class OutlineCreate(BaseModel):
     parent_id: Optional[str] = None
     title: str = ""
     content: str = ""
+    type: Literal["broad", "period", "volume"] = "broad"
     order: int = 0
+    chapter_start: Optional[int] = None
+    chapter_end: Optional[int] = None
 
 
 class OutlineUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
+    type: Optional[Literal["broad", "period", "volume"]] = None
     parent_id: Optional[str] = None
     order: Optional[int] = None
+    chapter_start: Optional[int] = None
+    chapter_end: Optional[int] = None
 
 
 class CharacterCreate(BaseModel):

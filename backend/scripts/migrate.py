@@ -30,6 +30,8 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("user_settings", "content_rating", "VARCHAR(16) DEFAULT 'standard'"),
     ("user_settings", "chapter_target_words", "INTEGER DEFAULT 2500"),
     ("long_change_records", "source", "VARCHAR(16) DEFAULT 'staged'"),
+    ("long_outlines", "chapter_start", "INTEGER"),
+    ("long_outlines", "chapter_end", "INTEGER"),
 ]
 
 CREATE_TABLES = [
