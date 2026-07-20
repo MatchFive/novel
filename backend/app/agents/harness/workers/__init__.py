@@ -440,10 +440,16 @@ class OutlineSplitWorker(WorkerBase):
                         }
                     })
         else:
-            # period 或 broad fallback：把原条目升级为 period
+            # period 或 broad fallback：把原条目升级为 period（保留现有父级以通过校验）
+            update_fields = {
+                "type": target_type if target_type in ("broad", "period") else "period",
+                "content": result.get("summary", target.get("content")),
+            }
+            if target.get("parent_id"):
+                update_fields["parent_id"] = target["parent_id"]
             changes.append({
                 "action": "update", "entity_id": entity_id,
-                "fields": {"type": target_type if target_type in ("broad", "period") else "period", "content": result.get("summary", target.get("content"))}
+                "fields": update_fields
             })
             for v in result.get("volumes") or []:
                 changes.append({

@@ -49,48 +49,7 @@ CREATE_TABLES = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_assistant_summary_embeddings_session_id ON assistant_summary_embeddings(session_id)",
     "DROP TABLE IF EXISTS message_embeddings",
-    """
-    CREATE TABLE IF NOT EXISTS migration_log (
-        name TEXT PRIMARY KEY,
-        run_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-    """,
 ]
-
-
-LEGACY_CLEANUP_SQL = """
-UPDATE long_outlines
-SET parent_id = NULL
-WHERE parent_id IS NOT NULL
-"""
-
-
-def _clear_legacy_outline_parent_ids(cur: sqlite3.Cursor) -> None:
-    """旧 `add_outline` 曾把 `parent_id` 当成 version_chain 写入；新设计把
-    parent_id 定义为树形父级。由于无法区分历史 parent_id 是树父还是旧版链，
-    安全起见一次性清空现有 parent_id，让用户在 UI 里重新挂接。"""
-    cur.execute(
-        "SELECT 1 FROM migration_log WHERE name = 'clear_outline_parent_id_2026_07'"
-    )
-    if cur.fetchone():
-        print("Legacy parent_id cleanup already run, skipping.")
-        return
-
-    cur.execute("SELECT COUNT(*) FROM long_outlines WHERE parent_id IS NOT NULL")
-    count = cur.fetchone()[0]
-    if count:
-        cur.execute(LEGACY_CLEANUP_SQL)
-        print(
-            f"Note: cleared {count} legacy parent_id values in long_outlines "
-            "(old version-chain semantics; re-parent via UI if needed)."
-        )
-    else:
-        print("No legacy parent_id values to clear in long_outlines.")
-
-    cur.execute(
-        "INSERT OR REPLACE INTO migration_log (name) VALUES "
-        "('clear_outline_parent_id_2026_07')"
-    )
 
 
 def migrate(db_path: Path = DB_PATH) -> None:
@@ -114,8 +73,6 @@ def migrate(db_path: Path = DB_PATH) -> None:
     for sql in CREATE_TABLES:
         cur.execute(sql)
         print(f"Executed: {sql.strip()[:60]}...")
-
-    _clear_legacy_outline_parent_ids(cur)
 
     conn.commit()
     conn.close()
