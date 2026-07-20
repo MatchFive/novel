@@ -158,7 +158,7 @@ export function OutlinePanel({ pid }: { pid: string }) {
                 <span className="text-sm font-medium text-ink">编辑{TYPE_LABEL[form.type || "broad"]}</span>
                 <div className="flex items-center gap-2">
                   <Button variant="ghost" onClick={handleSplit} disabled={form.type === "volume"}>AI 拆分</Button>
-                  <Button variant="ghost" onClick={handleCopyAsNewVersion} disabled={form.type === "volume"}>复制为新版</Button>
+                  <Button variant="ghost" onClick={handleCopyAsNewVersion} disabled={form.type !== "broad"}>复制为新版</Button>
                   <Button variant="primary" onClick={handleSave}>保存</Button>
                   <Button variant="ghost" onClick={handleDelete}>删除</Button>
                 </div>

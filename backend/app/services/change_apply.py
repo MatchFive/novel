@@ -7,7 +7,6 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy.orm import selectinload
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -110,61 +109,80 @@ async def _is_descendant(db: AsyncSession, model, node_id: str, ancestor_id: str
         if cur in visited:
             continue
         visited.add(cur)
-        row = await db.get(model, cur, options=[selectinload(model.children)])
-        if row is None:
-            continue
-        for child in row.children:
-            if child.id == node_id:
+        res = await db.execute(select(model.id).where(model.parent_id == cur))
+        for (child_id,) in res.all():
+            if child_id == node_id:
                 return True
-            stack.append(child.id)
+            stack.append(child_id)
     return False
 
 
 async def _validate_outline_change(db: AsyncSession, project_id: str, action: str, entity_id: str | None, after: dict):
     if action == "delete":
-        row = await db.get(LongOutline, entity_id, options=[selectinload(LongOutline.children)])
+        row = await db.get(LongOutline, entity_id)
         if row is None:
             raise NotFoundError("待删除节点不存在")
         if row.project_id != project_id:
             raise AppError("节点不属于当前项目", "INVALID_HIERARCHY", 400)
-        if row.children:
+        child = (
+            await db.execute(
+                select(LongOutline.id).where(LongOutline.parent_id == entity_id).limit(1)
+            )
+        ).scalar()
+        if child:
             raise AppError("该节点存在子级，请先删除子级", "HAS_CHILDREN", 400)
         return
 
     ctype = after.get("type")
+    if ctype is not None and ctype not in {"broad", "period", "volume"}:
+        raise AppError("无效的大纲类型", "INVALID_TYPE", 400)
+
+    existing = None
+    if action == "update" and entity_id:
+        existing = await db.get(LongOutline, entity_id)
+        if existing is None:
+            raise NotFoundError("待操作节点不存在")
+        if existing.project_id != project_id:
+            raise AppError("节点不属于当前项目", "INVALID_HIERARCHY", 400)
+        if ctype is None:
+            ctype = existing.type
+
+    if ctype is None:
+        raise AppError("缺少大纲类型", "INVALID_TYPE", 400)
+
     parent_id = after.get("parent_id")
-    if ctype:
-        if ctype == "broad" and parent_id:
-            raise AppError("总纲节点不能有父级", "INVALID_HIERARCHY", 400)
-        if ctype == "period" and not parent_id:
-            raise AppError("时期节点必须属于某个总纲", "INVALID_HIERARCHY", 400)
-        if ctype == "volume" and not parent_id:
-            raise AppError("卷节点必须属于某个时期", "INVALID_HIERARCHY", 400)
-        if parent_id:
-            parent_row = (await db.execute(
-                select(LongOutline.type, LongOutline.project_id).where(LongOutline.id == parent_id)
-            )).first()
-            if not parent_row:
-                raise AppError("父节点不存在", "PARENT_NOT_FOUND", 400)
-            parent_type, parent_project_id = parent_row
-            if parent_project_id != project_id:
-                raise AppError("父节点不属于当前项目", "INVALID_HIERARCHY", 400)
-            expected = {"period": "broad", "volume": "period"}.get(ctype)
-            if expected and parent_type != expected:
-                raise AppError(f"{ctype} 节点的父级必须是 {expected}", "INVALID_HIERARCHY", 400)
-            if entity_id:
-                node_project_id = (await db.execute(
-                    select(LongOutline.project_id).where(LongOutline.id == entity_id)
-                )).scalar()
-                if node_project_id is None:
-                    raise NotFoundError("待操作节点不存在")
-                if node_project_id != project_id:
-                    raise AppError("节点不属于当前项目", "INVALID_HIERARCHY", 400)
-                if await _is_descendant(db, LongOutline, parent_id, entity_id):
-                    raise AppError("不能将节点移动到自己的后代下", "CYCLIC_HIERARCHY", 400)
+    if parent_id is None and existing is not None:
+        parent_id = existing.parent_id
+
+    if ctype == "broad" and parent_id:
+        raise AppError("总纲节点不能有父级", "INVALID_HIERARCHY", 400)
+    if ctype == "period" and not parent_id:
+        raise AppError("时期节点必须属于某个总纲", "INVALID_HIERARCHY", 400)
+    if ctype == "volume" and not parent_id:
+        raise AppError("卷节点必须属于某个时期", "INVALID_HIERARCHY", 400)
+
+    if parent_id:
+        parent_row = (await db.execute(
+            select(LongOutline.type, LongOutline.project_id).where(LongOutline.id == parent_id)
+        )).first()
+        if not parent_row:
+            raise AppError("父节点不存在", "PARENT_NOT_FOUND", 400)
+        parent_type, parent_project_id = parent_row
+        if parent_project_id != project_id:
+            raise AppError("父节点不属于当前项目", "INVALID_HIERARCHY", 400)
+        expected = {"period": "broad", "volume": "period"}.get(ctype)
+        if expected and parent_type != expected:
+            raise AppError(f"{ctype} 节点的父级必须是 {expected}", "INVALID_HIERARCHY", 400)
+        if entity_id and await _is_descendant(db, LongOutline, parent_id, entity_id):
+            raise AppError("不能将节点移动到自己的后代下", "CYCLIC_HIERARCHY", 400)
 
     start = after.get("chapter_start")
     end = after.get("chapter_end")
+    if existing is not None:
+        if start is None:
+            start = existing.chapter_start
+        if end is None:
+            end = existing.chapter_end
     if start is not None and end is not None and start > end:
         raise AppError("起始章号不能大于结束章号", "INVALID_RANGE", 400)
     if ctype != "volume" and (start is not None or end is not None):

@@ -128,6 +128,14 @@ async def edit_outline(outline_id: str, payload: OutlineUpdate, db: AsyncSession
 
 @router.delete("/{outline_id}")
 async def remove_outline(outline_id: str, db: AsyncSession = Depends(get_db)):
+    row = await db.get(LongOutline, outline_id)
+    if not row:
+        raise NotFoundError("大纲不存在")
+    child = (await db.execute(
+        select(LongOutline.id).where(LongOutline.parent_id == outline_id).limit(1)
+    )).scalar()
+    if child:
+        raise ValidationError("该节点存在子级，请先删除子级", status_code=400, code="HAS_CHILDREN")
     ok = await delete_outline(db, outline_id)
     if not ok:
         raise NotFoundError("大纲不存在")

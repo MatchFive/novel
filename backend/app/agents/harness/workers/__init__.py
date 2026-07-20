@@ -243,8 +243,12 @@ class OutlineWorker(WorkerBase):
             "你是大纲架构师。根据项目摘要、现有大纲、角色、世界观和剧情节点，生成或更新大纲。"
             "必须以合法 JSON 返回，不要 markdown 代码块，不要解释：\n"
             '{"changes":[{"action":"add|update","entity_id":null或id,"fields":{'
-            '"title":"","content":"","type":"主线|支线|卷章","parent_id":null}}]}\n\n'
+            '"title":"","content":"","type":"broad|period|volume","parent_id":null,"chapter_start":null,"chapter_end":null}}]}\n\n'
             "业务规则：\n"
+            "- 大纲为三级树：总纲 broad（顶层，无父级）、时期 period（父级必须是 broad）、卷 volume（父级必须是 period）。\n"
+            "- 新增 period 时，parent_id 必须指向一个 broad 节点；新增 volume 时，parent_id 必须指向一个 period 节点。\n"
+            "- 更新现有大纲时，优先只修改 title、content、chapter_start、chapter_end；不要改动 type 和 parent_id，除非用户明确要求移动层级。\n"
+            "- chapter_start/chapter_end 仅 volume 可填，表示该卷覆盖的章节范围；1-based，且 start <= end。\n"
             "- 若用户目标涉及已有大纲，优先使用 action='update' 并填写其 id。\n"
             "- content 应包含主线目标、核心冲突、关键转折、整体结构。\n"
             "- 参考【现有角色】与【相关上下文】保持大纲与角色、世界观一致。\n"

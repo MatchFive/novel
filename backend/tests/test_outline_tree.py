@@ -511,3 +511,27 @@ async def test_api_valid_volume_accepted():
     assert body["chapter_start"] == 1
     assert body["chapter_end"] == 10
     assert body["parent_id"] == period["id"]
+
+
+@pytest.mark.anyio
+async def test_api_delete_node_with_children_fails():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+        broad = await repo.create_outline(
+            db, {"project_id": pid, "type": "broad", "title": "总纲"}
+        )
+        await repo.create_outline(
+            db,
+            {
+                "project_id": pid,
+                "type": "period",
+                "parent_id": broad["id"],
+                "title": "时期",
+            },
+        )
+    with TestClient(app) as client:
+        resp = client.delete(f"/api/long/outlines/{broad['id']}")
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["code"] == "HAS_CHILDREN"
