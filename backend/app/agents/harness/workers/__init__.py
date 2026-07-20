@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+from app import repositories as repo
+
 from .chapter_workers import (
     AssignmentWorker,
     BroadOutlineWorker,
@@ -25,6 +27,7 @@ __all__ = [
     "OutlineWorker",
     "PlotWorker",
     "ForeshadowWorker",
+    "OutlineSplitWorker",
     "BroadOutlineWorker",
     "PlotNodesWorker",
     "AssignmentWorker",
@@ -377,3 +380,74 @@ class ForeshadowWorker(WorkerBase):
         )
         user_prompt = f"【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
         return await self._tool_loop(system, user_prompt, history_context=history_context)
+
+
+class OutlineSplitWorker(WorkerBase):
+    worker_name = "outline_split"
+
+    async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
+        project_id = context.get("project_id")
+        entity_id = context.get("entity_id")
+        if not project_id or not entity_id:
+            return {"changes": [], "stage": "outline_split", "error": "缺少 project_id 或 entity_id"}
+
+        outlines = await repo.list_outlines(self.db, project_id)
+        target = next((o for o in outlines if o.get("id") == entity_id), None)
+        if not target:
+            return {"changes": [], "stage": "outline_split", "error": "目标大纲不存在"}
+
+        system = (
+            "你是大纲拆分师。根据用户目标，把一篇完整大纲拆分为固定三级树结构（总纲 broad / 时期 period / 卷 volume）。"
+            "如果目标条目是总纲级长文，输出多个时期；如果目标条目是单个时期，输出该时期的多个卷。"
+            "只返回合法 JSON，不要 markdown 代码块，不要解释。\n\n"
+            "输出格式（当目标是时期时）：\n"
+            '{"summary": "时期级概述（改写原条目）", "volumes": ['
+            '{"title": "卷标题", "content": "卷大纲全文", "chapter_start": 1, "chapter_end": 10}'
+            ']}\n\n'
+            "输出格式（当目标是总纲时）：\n"
+            '{"periods": [{"title": "时期标题", "summary": "时期概述", "volumes": [...]}]}\n\n'
+            "chapter_start/chapter_end 表示该卷覆盖第几章到第几章（1-based），允许为 null。"
+        )
+        user = f"【目标条目类型】{target.get('type')}\n【标题】{target.get('title')}\n【内容】\n{target.get('content', '')}\n\n【用户目标】\n{goal}"
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        if history_context:
+            messages = history_context + messages
+        result = await self.llm.parse_llm_json(messages)
+        if not isinstance(result, dict):
+            return {"changes": [], "stage": "outline_split", "error": "无法解析拆分结果"}
+
+        changes = []
+        target_type = target.get("type")
+        if target_type == "broad":
+            periods = result.get("periods") or []
+            for p in periods:
+                period_id = f"temp:period:{len(changes)}"
+                changes.append({
+                    "action": "add", "temp_id": period_id,
+                    "fields": {"title": p.get("title"), "content": p.get("summary"), "type": "period", "parent_id": entity_id}
+                })
+                for v in p.get("volumes") or []:
+                    changes.append({
+                        "action": "add",
+                        "fields": {
+                            "title": v.get("title"), "content": v.get("content"), "type": "volume",
+                            "parent_id": period_id,
+                            "chapter_start": v.get("chapter_start"), "chapter_end": v.get("chapter_end"),
+                        }
+                    })
+        else:
+            # period 或 broad fallback：把原条目升级为 period
+            changes.append({
+                "action": "update", "entity_id": entity_id,
+                "fields": {"type": target_type if target_type in ("broad", "period") else "period", "content": result.get("summary", target.get("content"))}
+            })
+            for v in result.get("volumes") or []:
+                changes.append({
+                    "action": "add",
+                    "fields": {
+                        "title": v.get("title"), "content": v.get("content"), "type": "volume",
+                        "parent_id": entity_id,
+                        "chapter_start": v.get("chapter_start"), "chapter_end": v.get("chapter_end"),
+                    }
+                })
+        return {"changes": changes, "stage": "outline_split"}
