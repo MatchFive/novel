@@ -21,13 +21,7 @@ async def get_outlines(project_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("")
 async def add_outline(payload: OutlineCreate, db: AsyncSession = Depends(get_db)):
-    # 版本链：若传入 parent 指向已有大纲，则新版本继承 version_chain
-    data = payload.model_dump()
-    if payload.parent_id:
-        parent = await db.get(LongOutline, payload.parent_id)
-        if parent:
-            data["version_chain"] = parent.version_chain or parent.id
-    return await create_outline(db, data)
+    return await create_outline(db, payload.model_dump())
 
 
 @router.put("/{outline_id}")
