@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Any
 
+from sqlalchemy.orm import selectinload
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,6 +99,61 @@ def _sanitize_fields(entity_type: str, data: dict) -> dict:
     return {k: v for k, v in data.items() if k in allowed}
 
 
+async def _is_descendant(db: AsyncSession, model, node_id: str, ancestor_id: str) -> bool:
+    """BFS 检查 node_id 是否在 ancestor_id 的后代链中（含自身）。"""
+    if node_id == ancestor_id:
+        return True
+    visited = set()
+    stack = [ancestor_id]
+    while stack:
+        cur = stack.pop()
+        if cur in visited:
+            continue
+        visited.add(cur)
+        row = await db.get(model, cur, options=[selectinload(model.children)])
+        if row is None:
+            continue
+        for child in row.children:
+            if child.id == node_id:
+                return True
+            stack.append(child.id)
+    return False
+
+
+async def _validate_outline_change(db: AsyncSession, project_id: str, action: str, entity_id: str | None, after: dict):
+    if action == "delete":
+        row = await db.get(LongOutline, entity_id, options=[selectinload(LongOutline.children)])
+        if row and row.children:
+            raise AppError("该节点存在子级，请先删除子级", "HAS_CHILDREN", 400)
+        return
+
+    ctype = after.get("type")
+    parent_id = after.get("parent_id")
+    if ctype:
+        if ctype == "broad" and parent_id:
+            raise AppError("总纲节点不能有父级", "INVALID_HIERARCHY", 400)
+        if ctype == "period" and not parent_id:
+            raise AppError("时期节点必须属于某个总纲", "INVALID_HIERARCHY", 400)
+        if ctype == "volume" and not parent_id:
+            raise AppError("卷节点必须属于某个时期", "INVALID_HIERARCHY", 400)
+        if parent_id:
+            parent = await db.get(LongOutline, parent_id)
+            if not parent:
+                raise AppError("父节点不存在", "PARENT_NOT_FOUND", 400)
+            expected = {"period": "broad", "volume": "period"}.get(ctype)
+            if expected and parent.type != expected:
+                raise AppError(f"{ctype} 节点的父级必须是 {expected}", "INVALID_HIERARCHY", 400)
+            if entity_id and await _is_descendant(db, LongOutline, parent_id, entity_id):
+                raise AppError("不能将节点移动到自己的后代下", "CYCLIC_HIERARCHY", 400)
+
+    start = after.get("chapter_start")
+    end = after.get("chapter_end")
+    if start is not None and end is not None and start > end:
+        raise AppError("起始章号不能大于结束章号", "INVALID_RANGE", 400)
+    if ctype != "volume" and (start is not None or end is not None):
+        raise AppError("只有卷节点可以设置章节范围", "INVALID_RANGE", 400)
+
+
 async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
     """应用单条变更。change 来自 staged_changes 或前端确认载荷。"""
     entity_type = change.get("entity_type")
@@ -112,6 +168,9 @@ async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
 
     # 清理 LLM 可能产生的未知字段，避免 SQLAlchemy / 数据库报错
     after = _sanitize_fields(entity_type, after)
+
+    if entity_type == "outline":
+        await _validate_outline_change(db, project_id, action, entity_id, after)
 
     try:
         if entity_type == "world":
@@ -200,14 +259,32 @@ async def confirm_session(db: AsyncSession, session_id: str, change_ids: list[st
     applied = []
     errors = []
     remaining = []
+    temp_map: dict[str, str] = {}
     for ch in staged:
         ch_id = ch.get("id")
         if target_ids is not None and ch_id not in target_ids:
             remaining.append(ch)
             continue
         try:
+            after = ch.get("after") or {}
+            parent_id = after.get("parent_id")
+            if isinstance(parent_id, str) and parent_id.startswith("temp:"):
+                real = temp_map.get(parent_id)
+                if not real:
+                    errors.append({"change_id": ch_id, "code": "PARENT_FAILED", "message": f"父节点 {parent_id} 尚未应用"})
+                    remaining.append(ch)
+                    continue
+                after = dict(after)
+                after["parent_id"] = real
+                ch["after"] = after
+
             r = await apply_change(db, project_id, ch)
             applied.append({**r, "change_id": ch_id})
+            new_id = r.get("entity_id")
+            temp_id = ch.get("temp_id")
+            if temp_id and new_id:
+                temp_map[temp_id] = new_id
+
             db.add(LongChangeRecord(
                 project_id=project_id,
                 entity_type=ch.get("entity_type"),

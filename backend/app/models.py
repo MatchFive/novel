@@ -18,7 +18,7 @@ from sqlalchemy import (
     JSON,
 )
 from sqlalchemy.dialects.sqlite import CHAR
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 
 from app.database import Base
 
@@ -168,12 +168,16 @@ class LongOutline(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
-    parent_id = Column(CHAR(36), nullable=True, index=True)
+    parent_id = Column(CHAR(36), ForeignKey("long_outlines.id"), nullable=True, index=True)
     title = Column(String(255), default="")
     content = Column(Text, default="")
     version_chain = Column(CHAR(36), nullable=True)  # 上一版 id
     order = Column(Integer, default=0)
     type = Column(String(32), default="broad")
+    chapter_start = Column(Integer, nullable=True)
+    chapter_end = Column(Integer, nullable=True)
+
+    children = relationship("LongOutline", backref=backref("parent", remote_side=[id]))
 
 
 class LongCharacter(Base):
