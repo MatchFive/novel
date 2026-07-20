@@ -68,6 +68,10 @@ class Settings(BaseSettings):
     # ---- 热搜缓存 TTL（秒）----
     hotspot_cache_ttl: int = 3600
 
+    # ---- 日志 ----
+    log_level: str = "INFO"
+    log_dir: str = str(DATA_DIR / "logs")
+
     @property
     def database_url(self) -> str:
         path = Path(self.db_path)

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import api from "@/api/client";
 import { settingsApi } from "@/api/settings";
 import type { ModelConfig, UserSettings } from "@/types";
 import { Button, Input, Card, Tag } from "@/components/ui";
@@ -43,6 +44,24 @@ export default function SettingsPage() {
   const saveSettings = async (patch: Partial<UserSettings>) => {
     const { data } = await settingsApi.update(patch);
     setSettings(data);
+  };
+
+  const exportLogs = async () => {
+    try {
+      const r = await api.get("/log/export", { responseType: "blob" });
+      const blob = new Blob([r.data], { type: "application/zip" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const ts = new Date().toISOString().slice(0, 19).replace(/:/g, "");
+      a.href = url;
+      a.download = `novel-studio-logs-${ts}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      setTestMsg("导出日志失败：" + (e instanceof Error ? e.message : String(e)));
+    }
   };
 
   const getAssistantSetting = (key: keyof UserSettings): number => settings[key] as number;
@@ -308,6 +327,13 @@ export default function SettingsPage() {
             </div>
             <div className="mt-1 text-xs text-muted">测试连接不会保存配置，只有「新增模型」或「保存」后才会持久化。</div>
           </div>
+        </div>
+      </Card>
+      <Card className="mt-6">
+        <div className="border-b border-line px-4 py-3 font-serif text-sm font-medium text-ink">诊断日志</div>
+        <div className="flex items-center justify-between p-4">
+          <span className="text-sm text-ink">导出后端、前端与启动器日志（.zip）</span>
+          <Button variant="primary" onClick={exportLogs}>导出日志</Button>
         </div>
       </Card>
     </div>
