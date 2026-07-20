@@ -168,6 +168,42 @@ async def test_outline_split_worker_invalid_llm_response(fake_db, fake_llm, monk
     assert result.get("error") == "无法解析拆分结果"
 
 
+@pytest.mark.anyio
+async def test_outline_split_worker_legacy_root_under_broad(fake_db, fake_llm, monkeypatch):
+    """legacy 类型（如'主线卷'）且无父级时，应归到已有总纲下作为时期并拆卷。"""
+    broad_root = {"id": "broad-1", "type": "broad", "title": "总纲", "content": "x"}
+    legacy = {"id": "legacy-1", "type": "主线卷", "title": "开荒期", "content": "很长"}
+
+    async def _list_outlines(db, project_id):
+        return [broad_root, legacy]
+
+    monkeypatch.setattr(
+        "app.agents.harness.workers.repo.list_outlines", _list_outlines
+    )
+
+    response = {
+        "summary": "开荒期概述",
+        "volumes": [
+            {"title": "第一卷", "content": "内容", "chapter_start": 1, "chapter_end": 10}
+        ],
+    }
+    worker = OutlineSplitWorker(fake_db, fake_llm(response), 5)
+    result = await worker.run("拆成几卷", {"project_id": "p1", "entity_id": "legacy-1"})
+
+    changes = result.get("changes", [])
+    assert len(changes) == 2
+    update_change = changes[0]
+    assert update_change["action"] == "update"
+    assert update_change["entity_id"] == "legacy-1"
+    assert update_change["fields"]["type"] == "period"
+    assert update_change["fields"]["parent_id"] == "broad-1"
+
+    volume_change = changes[1]
+    assert volume_change["action"] == "add"
+    assert volume_change["fields"]["type"] == "volume"
+    assert volume_change["fields"]["parent_id"] == "legacy-1"
+
+
 def test_make_change_carries_temp_id():
     cr = make_change(
         project_id="p1",
