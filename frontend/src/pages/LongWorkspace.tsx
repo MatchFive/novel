@@ -7,6 +7,7 @@ import { useAssistantSession } from "@/stores/useAssistantSession";
 import { ChapterList } from "@/components/chapter/ChapterList";
 import { ChapterEditor } from "@/components/chapter/ChapterEditor";
 import { EntityWorkbench, type EntityWorkbenchConfig } from "@/components/EntityWorkbench";
+import { OutlinePanel } from "@/components/OutlinePanel";
 import { Button, Card, SectionTitle } from "@/components/ui";
 import type { Chapter } from "@/types";
 
@@ -36,13 +37,9 @@ export default function LongWorkspace() {
         ))}
       </aside>
       <div className="flex-1 overflow-auto p-8">
-        {(tab === "outline" || tab === "character" || tab === "foreshadow" || tab === "world" || tab === "plot") && (
-          <EntityWorkbench
-            pid={id!}
-            config={WORKBENCH_CONFIGS[tab]}
-            api={KIND_API[tab]}
-            editorActions={tab === "outline" ? makeOutlineActions(id!) : undefined}
-          />
+        {tab === "outline" && <OutlinePanel pid={id!} />}
+        {(tab === "character" || tab === "foreshadow" || tab === "world" || tab === "plot") && (
+          <EntityWorkbench pid={id!} config={WORKBENCH_CONFIGS[tab]} api={KIND_API[tab]} />
         )}
         {tab === "chapter" && <ChapterPanel pid={id!} />}
         {tab === "graph" && <GraphPanel pid={id!} />}
@@ -52,7 +49,6 @@ export default function LongWorkspace() {
 }
 
 const KIND_API: Record<string, any> = {
-  outline: { list: longApi.outlines, add: longApi.addOutline, upd: longApi.updateOutline, del: longApi.deleteOutline },
   character: { list: longApi.characters, add: longApi.addCharacter, upd: longApi.updateCharacter, del: longApi.deleteCharacter },
   foreshadow: { list: longApi.foreshadows, add: longApi.addForeshadow, upd: longApi.updateForeshadow, del: longApi.deleteForeshadow },
   world: { list: longApi.world, add: longApi.addWorld, upd: longApi.updateWorld, del: longApi.deleteWorld },
@@ -60,26 +56,14 @@ const KIND_API: Record<string, any> = {
 };
 
 const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
-  outline: {
-    kind: "outline",
-    label: "大纲",
-    fields: [
-      { key: "title", label: "标题" },
-      { key: "content", label: "内容", multiline: true },
-    ],
-    titleOf: (it) => it.title || "（无标题）",
-    subtitleOf: (it) => (it.content || "").slice(0, 40),
-    searchKeys: ["title", "content"],
-    sortBy: (a, b) => (a.order || 0) - (b.order || 0),
-  },
   character: {
     kind: "character",
     label: "角色",
     fields: [
       { key: "name", label: "名称" },
-      { key: "traits", label: "性格", multiline: true },
-      { key: "ability", label: "能力", multiline: true },
-      { key: "status", label: "状态" },
+      { key: "traits", label: "性格", multiline: true, fill: true },
+      { key: "ability", label: "能力", multiline: true, fill: true },
+      { key: "status", label: "状态", multiline: true, rows: 3 },
     ],
     titleOf: (it) => it.name || "（未命名）",
     subtitleOf: (it) => (it.traits || "").slice(0, 30),
@@ -91,7 +75,7 @@ const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
     label: "伏笔",
     fields: [
       { key: "title", label: "标题" },
-      { key: "content", label: "内容", multiline: true },
+      { key: "content", label: "内容", multiline: true, fill: true },
       { key: "state", label: "状态", options: ["pending", "revealed", "abandoned"] },
     ],
     titleOf: (it) => it.title || "（无标题）",
@@ -105,7 +89,7 @@ const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
     label: "世界观",
     fields: [
       { key: "category", label: "分类" },
-      { key: "content", label: "内容", multiline: true },
+      { key: "content", label: "内容", multiline: true, fill: true },
     ],
     titleOf: (it) => it.category || "未分类",
     subtitleOf: (it) => (it.content || "").slice(0, 40),
@@ -117,7 +101,7 @@ const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
     label: "剧情节点",
     fields: [
       { key: "title", label: "标题" },
-      { key: "summary", label: "概要", multiline: true },
+      { key: "summary", label: "概要", multiline: true, fill: true },
       { key: "timeline_pos", label: "时间位置" },
     ],
     titleOf: (it) => it.title || "（无标题）",
@@ -128,25 +112,6 @@ const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
       (a.order || 0) - (b.order || 0),
   },
 };
-
-function makeOutlineActions(pid: string) {
-  return (item: any, reload: () => void) => (
-    <Button
-      variant="ghost"
-      onClick={async () => {
-        await longApi.addOutline({
-          project_id: pid,
-          title: item.title,
-          content: item.content,
-          version_chain: item.id,
-        });
-        reload();
-      }}
-    >
-      复制为新版
-    </Button>
-  );
-}
 
 function ChapterPanel({ pid }: { pid: string }) {
   const [items, setItems] = useState<Chapter[]>([]);
