@@ -23,16 +23,30 @@ async def assemble_context(db: AsyncSession, project_id: str) -> str:
     chapters = await repo.list_chapters(db, project_id)
 
     lines = []
-    lines.append("【大纲】")
-    lines.extend(f"- {o.get('title', '')}: {o.get('content', '')[:200]}" for o in outlines[:10])
-    lines.append("【角色】")
+    lines.append("【总纲】")
+    broads = [o for o in outlines if o.get("type") == "broad"]
+    for o in broads:
+        lines.append(f"- {o.get('title', '')}: {o.get('content', '')[:200]}")
+
+    last_chapter = sorted(chapters, key=lambda c: c.get('order', 0))[-1] if chapters else None
+    if last_chapter:
+        from app.agents.harness.workers.chapter_workers import _volume_outline_text
+        volume_outline = _volume_outline_text(outlines, last_chapter.get('order', 0))
+        lines.append("\n【当前卷大纲】")
+        lines.append(volume_outline)
+
+    lines.append("\n【其他时期/卷标题】")
+    for o in outlines:
+        if o.get("type") in ("period", "volume"):
+            lines.append(f"- {o.get('title', '')}")
+
+    lines.append("\n【角色】")
     lines.extend(f"- {c.get('name', '')}（{c.get('status', '')}）: {c.get('traits', '')}" for c in characters[:20])
-    lines.append("【待回收伏笔】")
+    lines.append("\n【待回收伏笔】")
     lines.extend(f"- {f.get('title', '')}: {f.get('content', '')[:120]}" for f in foreshadows if f.get('state') == 'pending')
-    lines.append("【已有章节（末段衔接）】")
-    if chapters:
-        last = sorted(chapters, key=lambda c: c.get('order', 0))[-1]
-        lines.append(f"上一章《{last.get('title', '')}》末尾：{(last.get('content', '') or '')[-300:]}")
+    lines.append("\n【已有章节（末段衔接）】")
+    if last_chapter:
+        lines.append(f"上一章《{last_chapter.get('title', '')}》末尾：{(last_chapter.get('content', '') or '')[-300:]}")
     return "\n".join(lines)
 
 
