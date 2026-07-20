@@ -451,6 +451,44 @@ async def test_api_non_volume_cannot_set_chapter_range():
 
 
 @pytest.mark.anyio
+async def test_api_update_volume_to_period_clears_chapter_range_rejected():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+        broad = await repo.create_outline(
+            db, {"project_id": pid, "type": "broad", "title": "总纲"}
+        )
+        period = await repo.create_outline(
+            db,
+            {"project_id": pid, "type": "period", "parent_id": broad["id"], "title": "时期"},
+        )
+        volume = await repo.create_outline(
+            db,
+            {
+                "project_id": pid,
+                "type": "volume",
+                "parent_id": period["id"],
+                "title": "第一卷",
+                "chapter_start": 1,
+                "chapter_end": 10,
+            },
+        )
+        # 另一总纲，作为 period 的合法父级
+        another_broad = await repo.create_outline(
+            db, {"project_id": pid, "type": "broad", "title": "总纲二"}
+        )
+    with TestClient(app) as client:
+        resp = client.put(
+            f"/api/long/outlines/{volume['id']}",
+            json={"type": "period", "parent_id": another_broad["id"]},
+        )
+    assert resp.status_code == 400
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["code"] == "VALIDATION_ERROR"
+    assert "只有卷节点可以设置章节范围" in body["message"]
+
+
+@pytest.mark.anyio
 async def test_api_valid_volume_accepted():
     async with AsyncSessionLocal() as db:
         pid = await _make_project(db)

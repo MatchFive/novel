@@ -89,8 +89,12 @@ async def _validate_outline_payload(
         if existing_id and await _is_descendant(db, parent_id, existing_id):
             _fail("不能将节点移动到自己的后代下")
 
-    chapter_start = payload.get("chapter_start")
-    chapter_end = payload.get("chapter_end")
+    if existing:
+        chapter_start = payload.get("chapter_start", existing.chapter_start)
+        chapter_end = payload.get("chapter_end", existing.chapter_end)
+    else:
+        chapter_start = payload.get("chapter_start")
+        chapter_end = payload.get("chapter_end")
     if node_type != "volume" and (chapter_start is not None or chapter_end is not None):
         _fail("只有卷节点可以设置章节范围")
     if chapter_start is not None and chapter_end is not None and chapter_start > chapter_end:
