@@ -51,5 +51,6 @@ def aggregate(project_id: str, worker_results: list[dict]) -> list[ChangeRecord]
                 entity_id=entity_id,
                 before=ch.get("before"),
                 stage=stage,
+                temp_id=ch.get("temp_id"),
             ))
     return records

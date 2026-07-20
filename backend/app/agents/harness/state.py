@@ -14,6 +14,7 @@ class ChangeRecord(BaseModel):
     entity_id: Optional[str] = None
     before: Optional[dict] = None
     after: Optional[dict] = None
+    temp_id: Optional[str] = None
     requires_confirmation: bool = True
     stage: str = ""
 
@@ -40,6 +41,7 @@ def make_change(
     entity_id: Optional[str] = None,
     before: Optional[dict] = None,
     stage: Optional[str] = None,
+    temp_id: Optional[str] = None,
 ) -> ChangeRecord:
     import uuid
     return ChangeRecord(
@@ -51,4 +53,5 @@ def make_change(
         before=before,
         after=after,
         stage=stage or "",
+        temp_id=temp_id,
     )
