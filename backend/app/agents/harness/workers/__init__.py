@@ -422,7 +422,25 @@ class OutlineSplitWorker(WorkerBase):
 
         changes = []
         target_type = target.get("type")
-        if target_type == "broad":
+        parent_id = target.get("parent_id")
+        valid_types = {"broad", "period", "volume"}
+        broad_roots = [
+            o for o in outlines
+            if o.get("type") == "broad" and not o.get("parent_id")
+        ]
+        is_broad_root = target_type == "broad" and not parent_id
+
+        if is_broad_root:
+            effective_type = "broad"
+        elif target_type in valid_types:
+            effective_type = target_type
+        else:
+            # 兼容历史/legacy 类型（如“主线卷”）：若存在总纲根节点，将其归到总纲下作为时期
+            effective_type = "period"
+            if not parent_id and broad_roots:
+                parent_id = broad_roots[0]["id"]
+
+        if effective_type == "broad":
             periods = result.get("periods") or []
             for p in periods:
                 period_id = f"temp:period:{len(changes)}"
@@ -440,13 +458,13 @@ class OutlineSplitWorker(WorkerBase):
                         }
                     })
         else:
-            # period 或 broad fallback：把原条目升级为 period（保留现有父级以通过校验）
+            # period（或 legacy 归一化后的时期）：改写原条目并挂到正确父级，再生成卷
             update_fields = {
-                "type": target_type if target_type in ("broad", "period") else "period",
+                "type": "period",
                 "content": result.get("summary", target.get("content")),
             }
-            if target.get("parent_id"):
-                update_fields["parent_id"] = target["parent_id"]
+            if parent_id:
+                update_fields["parent_id"] = parent_id
             changes.append({
                 "action": "update", "entity_id": entity_id,
                 "fields": update_fields

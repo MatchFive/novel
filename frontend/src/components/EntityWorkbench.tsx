@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useConfirm } from "@/hooks/useConfirm";
 import { Button, Input, Textarea, SectionTitle, Empty } from "@/components/ui";
 
 export interface FieldDef {
@@ -49,6 +50,7 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
   const [form, setForm] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   const load = async () => {
     try {
@@ -157,7 +159,7 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
 
   const handleDelete = async () => {
     if (!selectedId) return;
-    if (!window.confirm(`确定删除该${config.label}吗？`)) return;
+    if (!(await confirm(`删除${config.label}`, `确定删除该${config.label}吗？`))) return;
     try {
       await api.del(selectedId);
       setSelectedId(null);
@@ -171,6 +173,7 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
 
   return (
     <div className="flex h-full flex-col">
+      {dialog}
       <SectionTitle>{config.label}</SectionTitle>
       <div className="mt-4 flex h-0 flex-1 gap-4">
         {/* 中栏：搜索 + 分组列表 */}

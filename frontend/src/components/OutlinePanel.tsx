@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Input, Textarea, SectionTitle, Empty } from "@/components/ui";
+import { useConfirm } from "@/hooks/useConfirm";
 import { OutlineTree } from "./OutlineTree";
 import { longApi } from "@/api/long";
 import { OutlineNode, OutlineType, CreateOutlinePayload, UpdateOutlinePayload } from "@/types";
@@ -26,6 +27,7 @@ export function OutlinePanel({ pid }: { pid: string }) {
   const [form, setForm] = useState<Partial<OutlineNode>>({});
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   const load = async () => {
     const { data } = await longApi.outlines(pid);
@@ -60,7 +62,8 @@ export function OutlinePanel({ pid }: { pid: string }) {
   };
 
   const handleDelete = async () => {
-    if (!selectedId || !window.confirm("确定删除吗？")) return;
+    if (!selectedId) return;
+    if (!(await confirm("删除大纲节点", "确定删除吗？"))) return;
     try {
       await longApi.deleteOutline(selectedId);
       setSelectedId(null);
@@ -135,6 +138,7 @@ export function OutlinePanel({ pid }: { pid: string }) {
 
   return (
     <div className="flex h-full flex-col">
+      {dialog}
       <SectionTitle>大纲树</SectionTitle>
       <div className="mt-4 flex h-0 flex-1 gap-4">
         <div className="flex w-80 shrink-0 flex-col border border-line bg-surface p-3">

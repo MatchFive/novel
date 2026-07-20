@@ -4,6 +4,7 @@ import { longApi } from "@/api/long";
 import { graphApi } from "@/api/graph";
 import { assistantApi } from "@/api/short";
 import { useAssistantSession } from "@/stores/useAssistantSession";
+import { useConfirm } from "@/hooks/useConfirm";
 import { ChapterList } from "@/components/chapter/ChapterList";
 import { ChapterEditor } from "@/components/chapter/ChapterEditor";
 import { EntityWorkbench, type EntityWorkbenchConfig } from "@/components/EntityWorkbench";
@@ -124,6 +125,7 @@ function ChapterPanel({ pid }: { pid: string }) {
   const generating = useAssistantSession((s) => s.busy);
   const chaptersVersion = useAssistantSession((s) => s.chaptersVersion);
   const detailReqIdRef = useRef<number>(0);
+  const { confirm, dialog } = useConfirm();
 
   const showError = (e: unknown) => {
     const msg = e instanceof Error ? e.message : "操作失败";
@@ -230,7 +232,7 @@ function ChapterPanel({ pid }: { pid: string }) {
   };
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm("确定删除该章节吗？")) return;
+    if (!(await confirm("删除章节", "确定删除该章节吗？"))) return;
     clearError();
     try {
       await longApi.deleteChapter(id);
@@ -289,6 +291,7 @@ function ChapterPanel({ pid }: { pid: string }) {
 
   return (
     <div className="flex h-full flex-col">
+      {dialog}
       <SectionTitle>章节</SectionTitle>
       <div className="mt-4 flex h-0 flex-1 gap-4">
         <div className="flex w-72 flex-col border border-line bg-surface p-3">

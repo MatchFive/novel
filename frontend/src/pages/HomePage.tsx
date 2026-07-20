@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { projectsApi } from "@/api/projects";
+import { useConfirm } from "@/hooks/useConfirm";
 import type { Project } from "@/types";
 import { Button, Input, Textarea, Card } from "@/components/ui";
 
@@ -16,6 +17,7 @@ export default function HomePage() {
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const nav = useNavigate();
+  const { confirm, dialog } = useConfirm();
 
   const load = async () => {
     const { data } = await projectsApi.list(tab);
@@ -49,13 +51,14 @@ export default function HomePage() {
 
   const remove = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm("确定删除该项目吗？此操作不可恢复。")) return;
+    if (!(await confirm("删除项目", "确定删除该项目吗？此操作不可恢复。"))) return;
     await projectsApi.remove(id);
     load();
   };
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-12">
+      {dialog}
       <div className="flex items-end justify-between">
         <div>
           <h1 className="font-serif text-3xl font-semibold tracking-wide text-ink">项目</h1>
