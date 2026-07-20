@@ -9,6 +9,7 @@ export interface ModelConfigPayload {
   is_default?: boolean;
   level?: string;
   embedding_model?: string;
+  embedding_dimension?: number;
 }
 
 export const settingsApi = {
