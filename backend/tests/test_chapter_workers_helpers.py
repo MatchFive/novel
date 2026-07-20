@@ -1,7 +1,10 @@
 """章节生成 helper 纯函数测试。"""
 from __future__ import annotations
 
-from app.agents.harness.workers.chapter_workers import _chapter_summaries_chain
+from app.agents.harness.workers.chapter_workers import (
+    _chapter_summaries_chain,
+    _volume_outline_text,
+)
 
 
 def _ch(order, title, outline="", content=""):
@@ -33,3 +36,40 @@ def test_chain_falls_back_to_content_and_capped():
 def test_chain_empty_when_first_chapter():
     chapters = [_ch(0, "唯一章", outline="大纲")]
     assert _chapter_summaries_chain(chapters[0], chapters) == "（无）"
+
+
+def test_volume_outline_text_hits_range():
+    outlines = [
+        {"id": "p1", "type": "period", "title": "开荒期", "content": "概述"},
+        {"id": "v1", "type": "volume", "parent_id": "p1", "title": "第1卷", "content": "卷内容", "chapter_start": 1, "chapter_end": 10},
+    ]
+    assert "卷内容" in _volume_outline_text(outlines, 0)
+    assert "时期《开荒期》" in _volume_outline_text(outlines, 0)
+
+
+def test_volume_outline_text_misses_range():
+    outlines = [
+        {"id": "p1", "type": "period", "title": "开荒期", "content": "概述"},
+        {"id": "v1", "type": "volume", "parent_id": "p1", "title": "第1卷", "content": "卷内容", "chapter_start": 1, "chapter_end": 10},
+    ]
+    result = _volume_outline_text(outlines, 15)
+    assert "未找到本卷大纲" in result
+    assert "开荒期" in result
+
+
+def test_volume_outline_text_no_period_fallback():
+    outlines = [
+        {"id": "v1", "type": "volume", "title": "第1卷", "content": "卷内容", "chapter_start": 1, "chapter_end": 10},
+    ]
+    result = _volume_outline_text(outlines, 15)
+    assert result == "（暂无卷大纲）"
+
+
+def test_volume_outline_text_skips_volume_without_range():
+    outlines = [
+        {"id": "p1", "type": "period", "title": "开荒期", "content": "概述"},
+        {"id": "v1", "type": "volume", "parent_id": "p1", "title": "第1卷", "content": "卷内容"},
+    ]
+    result = _volume_outline_text(outlines, 0)
+    assert "未找到本卷大纲" in result
+    assert "开荒期" in result

@@ -77,6 +77,30 @@ def _broad_outline_text(outlines: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def _volume_outline_text(outlines: list[dict], chapter_order: int) -> str:
+    """根据章节序号定位其所属的卷大纲，返回包含时期和卷信息的文本。"""
+    chapter_num = chapter_order + 1
+    for o in outlines:
+        if o.get("type") != "volume":
+            continue
+        start = o.get("chapter_start")
+        end = o.get("chapter_end")
+        if start is None or end is None:
+            continue
+        if start <= chapter_num <= end:
+            parent = next((p for p in outlines if p.get("id") == o.get("parent_id")), None)
+            parts = []
+            if parent:
+                parts.append(f"时期《{parent.get('title', '')}》：{parent.get('content', '')}")
+            parts.append(f"卷《{o.get('title', '')}》（第 {start}-{end} 章）：{o.get('content', '')}")
+            return "\n\n".join(parts)
+    # fallback: 列出时期标题
+    periods = [o for o in outlines if o.get("type") == "period"]
+    if periods:
+        return "未找到本卷大纲，现有时期：" + " / ".join(p.get("title", "") for p in periods)
+    return "（暂无卷大纲）"
+
+
 def _previous_chapter(chapter: dict, chapters: list[dict]) -> dict | None:
     sorted_chapters = sorted(chapters, key=lambda c: c.get("order", 0))
     idx = next(
@@ -332,9 +356,12 @@ class ChapterOutlineWorker(WorkerBase):
 
         target_words, _rating = await _generation_settings(self.db)
         prev = _previous_chapter(chapter, chapters)
+        chapter_order = chapter.get("order", 0)
+        volume_outline = _volume_outline_text(outlines, chapter_order)
         prompt_context = {
             "chapter": chapter,
             "broad_outline": _broad_outline_text(outlines),
+            "volume_outline": volume_outline,
             "assigned_plot_nodes": _assigned_plot_nodes(plot_nodes, chapter_id),
             "characters": characters,
             "world": world,
@@ -379,6 +406,7 @@ class ChapterTextWorker(WorkerBase):
         world = context.get("world") or []
         foreshadows = context.get("foreshadows") or []
         chapter_id = chapter.get("id")
+        outlines = await repo.list_outlines(self.db, project_id)
 
         target_words, rating = await _generation_settings(self.db)
         notes: list[str] = []
@@ -388,10 +416,13 @@ class ChapterTextWorker(WorkerBase):
         prev_tail = _previous_chapter_text_tail(prev)
         active = _active_foreshadows(foreshadows)
         summaries_chain = _chapter_summaries_chain(chapter, chapters)
+        chapter_order = chapter.get("order", 0)
+        volume_outline = _volume_outline_text(outlines, chapter_order)
 
         system = chapter_text_prompt({
             "chapter": chapter,
             "detailed_outline": chapter.get("detailed_outline", ""),
+            "volume_outline": volume_outline,
             "assigned_plot_nodes": assigned,
             "characters": characters,
             "world": world,

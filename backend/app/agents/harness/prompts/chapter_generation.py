@@ -174,6 +174,9 @@ ${_json_rules}
 【目标章节】
 $chapter
 
+【本卷大纲】
+$volume_outline
+
 【总纲】
 $broad_outline
 
@@ -223,6 +226,9 @@ ${_json_rules}
 输入数据：
 【目标章节】
 $chapter
+
+【本卷大纲】
+$volume_outline
 
 【细纲】
 $detailed_outline
@@ -337,10 +343,12 @@ def CHAPTER_OUTLINE_PROMPT(
     previous_chapter_summary: str,
     active_foreshadows: list[dict],
     target_words: int = 2500,
+    volume_outline: str = "（暂无卷大纲）",
 ) -> str:
     return CHAPTER_OUTLINE_PROMPT_TEMPLATE.substitute(
         _json_rules=_JSON_RULES,
         chapter=_dumps(chapter),
+        volume_outline=volume_outline or "（暂无卷大纲）",
         broad_outline=broad_outline,
         assigned_plot_nodes=_dumps(assigned_plot_nodes),
         characters=_dumps(characters),
@@ -361,10 +369,12 @@ def CHAPTER_TEXT_PROMPT(
     active_foreshadows: list[dict],
     previous_summaries: str = "（无）",
     target_words: int = 2500,
+    volume_outline: str = "（暂无卷大纲）",
 ) -> str:
     return CHAPTER_TEXT_PROMPT_TEMPLATE.substitute(
         _json_rules=_JSON_RULES,
         chapter=_dumps(chapter),
+        volume_outline=volume_outline or "（暂无卷大纲）",
         detailed_outline=detailed_outline or "（无）",
         assigned_plot_nodes=_dumps(assigned_plot_nodes),
         characters=_dumps(characters),
@@ -438,6 +448,7 @@ def chapter_outline_prompt(context: dict) -> str:
         previous_chapter_summary=context.get("previous_chapter_summary", "") or "（无）",
         active_foreshadows=context.get("active_foreshadows") or [],
         target_words=context.get("target_words") or 2500,
+        volume_outline=context.get("volume_outline", "") or "（暂无卷大纲）",
     )
 
 
@@ -453,6 +464,7 @@ def chapter_text_prompt(context: dict) -> str:
         active_foreshadows=context.get("active_foreshadows") or [],
         previous_summaries=context.get("previous_summaries", "") or "（无）",
         target_words=context.get("target_words") or 2500,
+        volume_outline=context.get("volume_outline", "") or "（暂无卷大纲）",
     )
 
 
