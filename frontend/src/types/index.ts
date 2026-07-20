@@ -73,7 +73,7 @@ export interface Chapter {
 
 export type OutlineType = "broad" | "period" | "volume";
 
-export interface OutlinePayload {
+export interface OutlinePayloadBase {
   project_id?: string;
   title?: string;
   content?: string;
@@ -83,6 +83,14 @@ export interface OutlinePayload {
   chapter_start?: number | null;
   chapter_end?: number | null;
   version_chain?: string | null;
+}
+
+export interface CreateOutlinePayload extends OutlinePayloadBase {
+  project_id: string;
+}
+
+export interface UpdateOutlinePayload extends OutlinePayloadBase {
+  project_id?: string;
 }
 
 export interface OutlineNode {

@@ -61,9 +61,9 @@ const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
     label: "角色",
     fields: [
       { key: "name", label: "名称" },
-      { key: "traits", label: "性格", multiline: true, fill: true },
-      { key: "ability", label: "能力", multiline: true, fill: true },
-      { key: "status", label: "状态", multiline: true, rows: 3 },
+      { key: "traits", label: "性格", multiline: true },
+      { key: "ability", label: "能力", multiline: true },
+      { key: "status", label: "状态" },
     ],
     titleOf: (it) => it.name || "（未命名）",
     subtitleOf: (it) => (it.traits || "").slice(0, 30),
@@ -75,7 +75,7 @@ const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
     label: "伏笔",
     fields: [
       { key: "title", label: "标题" },
-      { key: "content", label: "内容", multiline: true, fill: true },
+      { key: "content", label: "内容", multiline: true },
       { key: "state", label: "状态", options: ["pending", "revealed", "abandoned"] },
     ],
     titleOf: (it) => it.title || "（无标题）",
@@ -89,7 +89,7 @@ const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
     label: "世界观",
     fields: [
       { key: "category", label: "分类" },
-      { key: "content", label: "内容", multiline: true, fill: true },
+      { key: "content", label: "内容", multiline: true },
     ],
     titleOf: (it) => it.category || "未分类",
     subtitleOf: (it) => (it.content || "").slice(0, 40),
@@ -101,7 +101,7 @@ const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
     label: "剧情节点",
     fields: [
       { key: "title", label: "标题" },
-      { key: "summary", label: "概要", multiline: true, fill: true },
+      { key: "summary", label: "概要", multiline: true },
       { key: "timeline_pos", label: "时间位置" },
     ],
     titleOf: (it) => it.title || "（无标题）",

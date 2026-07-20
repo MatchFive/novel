@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Input, Textarea, SectionTitle, Empty } from "@/components/ui";
 import { OutlineTree } from "./OutlineTree";
 import { longApi } from "@/api/long";
-import { OutlineNode, OutlineType } from "@/types";
+import { OutlineNode, OutlineType, CreateOutlinePayload, UpdateOutlinePayload } from "@/types";
 
 function buildTree(outlines: OutlineNode[]): OutlineNode[] {
   const byId = new Map(outlines.map((o) => [o.id, { ...o, children: [] as OutlineNode[] }]));
@@ -11,6 +11,9 @@ function buildTree(outlines: OutlineNode[]): OutlineNode[] {
     const parent = o.parent_id ? byId.get(o.parent_id) : null;
     if (parent) parent.children!.push(o);
     else roots.push(o);
+  }
+  for (const o of byId.values()) {
+    o.children!.sort((a, b) => a.order - b.order);
   }
   return roots.sort((a, b) => a.order - b.order);
 }
@@ -43,12 +46,13 @@ export function OutlinePanel({ pid }: { pid: string }) {
     setError(null);
     if (!selectedId) return;
     try {
-      await longApi.updateOutline(selectedId, {
+      const payload: UpdateOutlinePayload = {
         title: form.title || "",
         content: form.content || "",
         chapter_start: form.type === "volume" ? form.chapter_start ?? null : null,
         chapter_end: form.type === "volume" ? form.chapter_end ?? null : null,
-      });
+      };
+      await longApi.updateOutline(selectedId, payload);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存失败");
@@ -69,7 +73,8 @@ export function OutlinePanel({ pid }: { pid: string }) {
   const handleAddRoot = async () => {
     setError(null);
     try {
-      const res = await longApi.addOutline({ project_id: pid, title: "新总纲", type: "broad", order: 0 });
+      const payload: CreateOutlinePayload = { project_id: pid, title: "新总纲", type: "broad", order: 0 };
+      const res = await longApi.addOutline(payload);
       await load();
       setSelectedId(res?.data?.id || null);
     } catch (e) {
@@ -81,13 +86,14 @@ export function OutlinePanel({ pid }: { pid: string }) {
     setError(null);
     const childType: OutlineType = parent.type === "broad" ? "period" : "volume";
     try {
-      const res = await longApi.addOutline({
+      const payload: CreateOutlinePayload = {
         project_id: pid,
         title: childType === "period" ? "新时期" : "新卷",
         type: childType,
         parent_id: parent.id,
         order: (parent.children?.length || 0),
-      });
+      };
+      const res = await longApi.addOutline(payload);
       await load();
       setSelectedId(res?.data?.id || null);
     } catch (e) {
@@ -105,6 +111,24 @@ export function OutlinePanel({ pid }: { pid: string }) {
       alert("拆分建议已生成，请打开右下角 AI 助手面板确认");
     } catch (e) {
       setError(e instanceof Error ? e.message : "拆分失败");
+    }
+  };
+
+  const handleCopyAsNewVersion = async () => {
+    if (!selected) return;
+    setError(null);
+    try {
+      const payload: CreateOutlinePayload = {
+        project_id: pid,
+        title: selected.title,
+        content: selected.content,
+        version_chain: selected.id,
+      };
+      const res = await longApi.addOutline(payload);
+      await load();
+      setSelectedId(res?.data?.id || null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "复制失败");
     }
   };
 
@@ -133,6 +157,7 @@ export function OutlinePanel({ pid }: { pid: string }) {
                 <span className="text-sm font-medium text-ink">编辑{TYPE_LABEL[form.type || "broad"]}</span>
                 <div className="flex items-center gap-2">
                   <Button variant="ghost" onClick={handleSplit} disabled={form.type === "volume"}>AI 拆分</Button>
+                  <Button variant="ghost" onClick={handleCopyAsNewVersion} disabled={form.type === "volume"}>复制为新版</Button>
                   <Button variant="primary" onClick={handleSave}>保存</Button>
                   <Button variant="ghost" onClick={handleDelete}>删除</Button>
                 </div>

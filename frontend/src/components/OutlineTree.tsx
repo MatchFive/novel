@@ -56,7 +56,7 @@ export function OutlineTree({ nodes, selectedId, onSelect, onAddChild, search }:
               {isExpanded ? "▼" : "▶"}
             </span>
           )}
-          <span className="mr-2 rounded-sm border border-line px-1 text-[10px] text-muted">{TYPE_LABEL[n.type]}</span>
+          <span className="mr-2 border border-line px-1 text-[10px] text-muted">{TYPE_LABEL[n.type]}</span>
           <span className="flex-1 truncate text-sm text-ink">{n.title || "（无标题）"}</span>
           {n.type !== "volume" && (
             <button className="ml-2 text-xs text-accent" onClick={(e) => { e.stopPropagation(); onAddChild(n); }}>+</button>

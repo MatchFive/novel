@@ -1,10 +1,10 @@
 import api from "./client";
-import type { OutlinePayload } from "@/types";
+import type { CreateOutlinePayload, UpdateOutlinePayload } from "@/types";
 
 export const longApi = {
   outlines: (pid: string) => api.get(`/long/outlines/${pid}`),
-  addOutline: (data: OutlinePayload) => api.post("/long/outlines", data),
-  updateOutline: (id: string, data: OutlinePayload) => api.put(`/long/outlines/${id}`, data),
+  addOutline: (data: CreateOutlinePayload) => api.post("/long/outlines", data),
+  updateOutline: (id: string, data: UpdateOutlinePayload) => api.put(`/long/outlines/${id}`, data),
   deleteOutline: (id: string) => api.delete(`/long/outlines/${id}`),
   outlineHistory: (pid: string, id: string) => api.get(`/long/outlines/${pid}/history/${id}`),
   splitOutline: (project_id: string, entity_id: string, message: string) =>

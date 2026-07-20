@@ -6,6 +6,10 @@ export interface FieldDef {
   label: string;
   multiline?: boolean;
   options?: string[];
+  /** 多行字段的固定行数（默认 4） */
+  rows?: number;
+  /** 多行字段撑满编辑器剩余高度（适用于大纲/世界观这类长文本主字段） */
+  fill?: boolean;
 }
 
 export interface EntityWorkbenchConfig {
@@ -241,9 +245,9 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
                   )}
                 </div>
               </div>
-              <div className="space-y-3">
+              <div className="flex min-h-0 flex-1 flex-col gap-3">
                 {config.fields.map((f) => (
-                  <div key={f.key}>
+                  <div key={f.key} className={f.fill ? "flex min-h-0 flex-1 flex-col" : undefined}>
                     <label className="mb-1 block text-xs text-muted">{f.label}</label>
                     {f.options ? (
                       <select
@@ -258,7 +262,8 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
                       </select>
                     ) : f.multiline ? (
                       <Textarea
-                        rows={4}
+                        rows={f.fill ? undefined : (f.rows ?? 4)}
+                        className={f.fill ? "min-h-[12rem] flex-1 resize-none leading-relaxed" : "leading-relaxed"}
                         value={form[f.key] || ""}
                         onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
                       />
