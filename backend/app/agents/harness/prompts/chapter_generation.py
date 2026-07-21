@@ -149,18 +149,21 @@ ${_json_rules}
 {
   "changes": [
     {
-      "action": "update",
-      "entity_id": "chapter_id",
+      "action": "add|update",
+      "entity_id": "chapter_id（若目标章节已存在）或 null（若目标章节尚未创建）",
       "fields": {
+        "title": "章节标题",
         "detailed_outline": "...",
-        "status": "reviewed"
+        "status": "reviewed",
+        "order": 0
       }
     }
   ]
 }
 
 业务规则：
-- entity_id 必须为目标章节 id（即下方【目标章节】的 id）。
+- 若【目标章节】已有 id，使用 action="update" 并填写其 id。
+- 若【目标章节】id 为空（新增章节），使用 action="add"，entity_id 为 null，并在 fields 中提供 title、order（与【目标章节】的 order 一致）、detailed_outline、status="reviewed"。
 - detailed_outline 应包含：场景列表、本章目标、冲突、情感弧线、结尾钩子。
 - 保持与总纲、剧情节点、角色、世界观一致。
 - 参考前文摘要和活跃伏笔。

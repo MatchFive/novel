@@ -118,21 +118,38 @@ def _detect_compound_intent(user_input: str) -> dict | None:
 
 
 def _detect_chapter_generation_intent(user_input: str) -> dict | None:
-    """对'生成第 X 章细纲/正文'类指令做精确路由，避免 supervisor 错派给 outline。"""
+    """对'生成第 X 章/前三章/第 X-Y 章 细纲/正文'类指令做精确路由，避免 supervisor 错派给 outline。"""
     text = user_input.lower()
-    match = re.search(r"第\s*(\d+)\s*章", user_input)
-    if not match:
+
+    # 范围/批量：前三章、第1章到第3章
+    range_match = re.search(r"第\s*(\d+)\s*章\s*(?:到|至)\s*第\s*(\d+)\s*章", user_input)
+    prefix_match = re.search(r"前\s*(\d+)\s*章", user_input)
+    single_match = re.search(r"第\s*(\d+)\s*章", user_input)
+
+    chapter_nums: list[int] | None = None
+    label = ""
+    if range_match:
+        start, end = int(range_match.group(1)), int(range_match.group(2))
+        chapter_nums = list(range(start, end + 1))
+        label = f"第 {start} 章到第 {end} 章"
+    elif prefix_match:
+        n = int(prefix_match.group(1))
+        chapter_nums = list(range(1, n + 1))
+        label = f"前 {n} 章"
+    elif single_match:
+        chapter_nums = [int(single_match.group(1))]
+        label = f"第 {chapter_nums[0]} 章"
+
+    if not chapter_nums:
         return None
-    chapter_num = int(match.group(1))
+
     has_outline = "细纲" in text or "章节大纲" in text
-    has_text = "正文" in text or "写" in text or "生成" in text
-    if has_outline:
-        goal = f"生成第 {chapter_num} 章细纲，严格遵循项目总纲、卷大纲与已有细纲"
+    has_text = "正文" in text or "写" in text
+    if has_outline or not has_text:
+        goal = f"生成{label}细纲，严格遵循项目总纲、卷大纲与已有细纲；不存在的章节请先创建再写入细纲"
         return {"intent": goal, "tasks": [{"worker": "chapter_outline", "goal": goal}]}
-    if has_text:
-        goal = f"生成第 {chapter_num} 章正文，严格遵循项目总纲、卷大纲与细纲"
-        return {"intent": goal, "tasks": [{"worker": "chapter_text", "goal": goal}]}
-    return None
+    goal = f"生成{label}正文，严格遵循项目总纲、卷大纲与细纲"
+    return {"intent": goal, "tasks": [{"worker": "chapter_text", "goal": goal}]}
 
 
 # context 中实体键与 change entity_type 的映射

@@ -37,10 +37,25 @@ def _project_summary(context: dict) -> str:
 
 
 def _parse_chapter_number(goal: str) -> int | None:
-    """从目标中解析章节序号，例如“生成第 1 章细纲”。"""
+    """从目标中解析单个章节序号，例如“生成第 1 章细纲”。"""
     match = re.search(r"第\s*(\d+)\s*章", goal)
     if match:
         return int(match.group(1))
+    return None
+
+
+def _parse_chapter_numbers(goal: str) -> list[int] | None:
+    """解析目标中的章节序号列表：支持“前三章”“第1章到第3章”“第5章”。"""
+    single = _parse_chapter_number(goal)
+    if single is not None:
+        return [single]
+    range_match = re.search(r"第\s*(\d+)\s*章\s*(?:到|至)\s*第\s*(\d+)\s*章", goal)
+    if range_match:
+        start, end = int(range_match.group(1)), int(range_match.group(2))
+        return list(range(start, end + 1))
+    prefix_match = re.search(r"前\s*(\d+)\s*章", goal)
+    if prefix_match:
+        return list(range(1, int(prefix_match.group(1)) + 1))
     return None
 
 
@@ -330,22 +345,29 @@ class ChapterOutlineWorker(WorkerBase):
             return {"changes": [], "stage": "chapter_outline", "error": "缺少 project_id"}
 
         chapters = await repo.list_chapters(self.db, project_id)
-        chapter = _find_target_chapter(goal, context, chapters)
-        if not chapter:
-            if _parse_chapter_number(goal) is None:
-                return {
-                    "changes": [],
-                    "stage": "chapter_outline",
-                    "error": "无法识别目标章节",
-                }
-            return {"changes": [], "stage": "chapter_outline", "error": "未找到目标章节"}
+        orders = _parse_chapter_numbers(goal)
+
+        # 如果没有解析出序号，但上下文携带了 entity_id，则取该章节的 order
+        if orders is None and context.get("entity_type") == "chapter" and context.get("entity_id"):
+            target = next(
+                (c for c in chapters if c.get("id") == context.get("entity_id")),
+                None,
+            )
+            if target is not None:
+                orders = [target.get("order", 0) + 1]
+
+        if not orders:
+            return {
+                "changes": [],
+                "stage": "chapter_outline",
+                "error": "无法识别目标章节，请使用“生成第 X 章细纲”或“生成前三章细纲”",
+            }
 
         outlines = await repo.list_outlines(self.db, project_id)
         plot_nodes = await repo.list_plot(self.db, project_id)
         characters = context.get("characters") or []
         world = context.get("world") or []
         foreshadows = context.get("foreshadows") or []
-        chapter_id = chapter.get("id")
 
         related = ""
         builder = ContextBuilder(self.db, self.llm, entities=context)
@@ -355,30 +377,90 @@ class ChapterOutlineWorker(WorkerBase):
             logger.exception("ContextBuilder failed for chapter_outline")
 
         target_words, _rating = await _generation_settings(self.db)
-        prev = _previous_chapter(chapter, chapters)
-        chapter_order = chapter.get("order", 0)
-        volume_outline = _volume_outline_text(outlines, chapter_order)
-        prompt_context = {
-            "chapter": chapter,
-            "broad_outline": _broad_outline_text(outlines),
-            "volume_outline": volume_outline,
-            "assigned_plot_nodes": _assigned_plot_nodes(plot_nodes, chapter_id),
-            "characters": characters,
-            "world": world,
-            "previous_chapter_summary": _previous_chapter_summary(prev),
-            "active_foreshadows": _active_foreshadows(foreshadows),
-            "target_words": target_words,
-        }
-        system = chapter_outline_prompt(prompt_context)
-        user_prompt = _user_prompt(goal, related)
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_prompt},
-        ]
-        if history_context:
-            messages = history_context + messages
-        result = await _generate_json(self.llm, messages)
-        return _result_to_response(result, "chapter_outline")
+
+        all_changes: list[dict] = []
+        previous_chapter: dict | None = None
+
+        for chapter_num in sorted(orders):
+            chapter_order = chapter_num - 1
+            existing = next(
+                (c for c in chapters if c.get("order") == chapter_order),
+                None,
+            )
+            chapter_for_prompt = existing or {
+                "id": None,
+                "project_id": project_id,
+                "order": chapter_order,
+                "title": f"第 {chapter_num} 章",
+                "content": "",
+                "detailed_outline": "",
+                "status": "draft",
+            }
+
+            volume_outline = _volume_outline_text(outlines, chapter_order)
+            prompt_context = {
+                "chapter": chapter_for_prompt,
+                "broad_outline": _broad_outline_text(outlines),
+                "volume_outline": volume_outline,
+                "assigned_plot_nodes": _assigned_plot_nodes(plot_nodes, chapter_for_prompt.get("id")),
+                "characters": characters,
+                "world": world,
+                "previous_chapter_summary": _previous_chapter_summary(previous_chapter),
+                "active_foreshadows": _active_foreshadows(foreshadows),
+                "target_words": target_words,
+            }
+            system = chapter_outline_prompt(prompt_context)
+            user_prompt = _user_prompt(
+                f"生成第 {chapter_num} 章细纲",
+                related,
+            )
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt},
+            ]
+            if history_context:
+                messages = history_context + messages
+
+            result = await _generate_json(self.llm, messages)
+            raw_changes: list[dict] = []
+            if isinstance(result, dict):
+                raw_changes = result.get("changes") or []
+            elif isinstance(result, list):
+                raw_changes = result
+
+            for raw in raw_changes:
+                fields = dict(raw.get("fields") or {})
+                if not fields.get("detailed_outline"):
+                    continue
+                if not fields.get("title"):
+                    fields["title"] = chapter_for_prompt.get("title") or f"第 {chapter_num} 章"
+                fields["order"] = chapter_order
+                fields["status"] = "reviewed"
+                if existing:
+                    all_changes.append({
+                        "action": "update",
+                        "entity_id": existing["id"],
+                        "fields": fields,
+                    })
+                else:
+                    # 新增章节：去掉 worker 可能带上的 id/project_id，由 change_apply 写入
+                    fields.pop("id", None)
+                    fields.pop("project_id", None)
+                    all_changes.append({
+                        "action": "add",
+                        "entity_id": None,
+                        "fields": fields,
+                    })
+
+            # 下一章的“前文”基于本章（按顺序）
+            previous_chapter = {
+                **chapter_for_prompt,
+                "detailed_outline": raw_changes[0]["fields"]["detailed_outline"]
+                if raw_changes and raw_changes[0].get("fields", {}).get("detailed_outline")
+                else "",
+            }
+
+        return {"changes": all_changes, "stage": "chapter_outline"}
 
 
 class ChapterTextWorker(WorkerBase):
