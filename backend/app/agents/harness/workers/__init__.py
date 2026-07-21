@@ -247,7 +247,8 @@ class OutlineWorker(WorkerBase):
             '"title":"","content":"","type":"broad|period|volume","parent_id":null,"chapter_start":null,"chapter_end":null}}]}\n\n'
             "业务规则：\n"
             "- 大纲为三级树：总纲 broad（顶层，无父级）、时期 period（父级必须是 broad）、卷 volume（父级必须是 period）。\n"
-            "- 新增 period 时，parent_id 必须指向一个 broad 节点；新增 volume 时，parent_id 必须指向一个 period 节点。\n"
+            "- 新增 period 时，parent_id 必须指向一个 broad 节点；新增 volume 时，parent_id 必须指向一个 period 节点，严禁直接挂在 broad 下。\n"
+            "- period 节点的标题不要出现'卷'字，可用'第一时期/第二时期'或'第一部/第二部'等；只有 volume 节点才使用'第 X 卷'命名。\n"
             "- 如果一次返回里同时新增总纲和它的子节点，总纲必须设置 temp_id（如 \"temp:broad:1\"），"
             "子节点的 parent_id 必须直接引用该 temp_id。禁止使用 <broad_id>、<period_id> 这类占位符。\n"
             "- 更新现有大纲时，优先只修改 title、content、chapter_start、chapter_end；不要改动 type 和 parent_id，除非用户明确要求移动层级。\n"
@@ -343,17 +344,26 @@ class OutlineWorker(WorkerBase):
 
     @staticmethod
     def _normalize_outline_changes(changes: list[dict], existing_outlines: list[dict]) -> list[dict]:
-        """修正新增大纲的 temp_id、占位父节点、字段合法性，并保证 broad/period/volume 顺序。"""
+        """修正新增大纲的 temp_id、占位父节点、层级合法性，并保证 broad/period/volume 顺序。"""
         existing_ids = {str(o.get("id")) for o in existing_outlines if o.get("id")}
+        existing_by_id = {str(o.get("id")): o for o in existing_outlines if o.get("id")}
         broad_root_ids = [
             str(o.get("id"))
             for o in existing_outlines
             if o.get("type") == "broad" and not o.get("parent_id")
         ]
 
-        # 给新增 broad 分配 temp_id
+        # 给新增 broad 分配 temp_id，并记录 broad -> period 映射（已有 period 优先）
         broad_temp_ids: list[str] = []
         broad_counter = 0
+        broad_to_periods: dict[str, list[str]] = {}
+        for o in existing_outlines:
+            if o.get("type") != "period":
+                continue
+            parent_id = str(o.get("parent_id")) if o.get("parent_id") else None
+            if parent_id and parent_id in existing_ids and existing_by_id[parent_id].get("type") == "broad":
+                broad_to_periods.setdefault(parent_id, []).append(str(o.get("id")))
+
         for ch in changes:
             if ch.get("action") != "add":
                 continue
@@ -363,6 +373,7 @@ class OutlineWorker(WorkerBase):
                 tid = f"temp:broad:{broad_counter}"
                 ch["temp_id"] = tid
                 broad_temp_ids.append(tid)
+                broad_to_periods.setdefault(tid, [])
 
         # 优先用本次新增的总纲作为 period 父级；否则用已有 broad 根节点
         default_broad_id = broad_temp_ids[0] if broad_temp_ids else (broad_root_ids[0] if broad_root_ids else None)
@@ -384,6 +395,52 @@ class OutlineWorker(WorkerBase):
         def _is_placeholder(value) -> bool:
             return isinstance(value, str) and ("<" in value or ">" in value or value not in existing_ids and not value.startswith("temp:"))
 
+        def _get_type(pid: str | None) -> str | None:
+            if not pid:
+                return None
+            if pid in existing_by_id:
+                return existing_by_id[pid].get("type")
+            for ch in changes:
+                if ch.get("temp_id") == pid:
+                    return (ch.get("fields") or {}).get("type")
+            return None
+
+        def _period_range(period_id: str) -> tuple[int | None, int | None]:
+            node = existing_by_id.get(period_id)
+            if not node:
+                for ch in changes:
+                    if ch.get("temp_id") == period_id:
+                        node = ch.get("fields") or {}
+                        break
+            if not node:
+                return (None, None)
+            return (node.get("chapter_start"), node.get("chapter_end"))
+
+        def _choose_period_for_volume(volume_fields: dict, parent_id: str | None) -> str | None:
+            """为 volume 选一个合适的 period：同 broad 下，优先 chapter_start 落在范围内的 period。"""
+            broad_id = parent_id
+            if broad_id and _get_type(broad_id) == "period":
+                return broad_id
+            if broad_id and _get_type(broad_id) != "broad":
+                broad_id = None
+            candidates = broad_to_periods.get(broad_id) if broad_id else None
+            if not candidates:
+                # 退而求其次：任何已有或新增的 period
+                candidates = [str(o.get("id")) for o in existing_outlines if o.get("type") == "period"]
+                candidates += period_temp_ids
+            if not candidates:
+                return None
+            v_start = volume_fields.get("chapter_start") or volume_fields.get("chapter_end") or 1
+            best = None
+            for pid in candidates:
+                start, end = _period_range(pid)
+                if start is not None and end is not None and start <= v_start <= end:
+                    return pid
+                if best is None:
+                    best = pid
+            return best
+
+        extra_periods: list[dict] = []
         for ch in changes:
             fields = ch.get("fields") or {}
             ctype = fields.get("type") or ""
@@ -393,22 +450,47 @@ class OutlineWorker(WorkerBase):
                 fields["parent_id"] = None
                 fields.pop("chapter_start", None)
                 fields.pop("chapter_end", None)
+                # 避免 period 标题出现“卷”
                 continue
 
             if ctype == "period":
                 if parent_id is None or _is_placeholder(parent_id):
                     if default_broad_id:
                         fields["parent_id"] = default_broad_id
+                # period 标题不应含“卷”
+                title = fields.get("title") or ""
+                if "卷" in title:
+                    fields["title"] = title.replace("第一卷", "第一时期").replace("第二卷", "第二时期").replace("第三卷", "第三时期").replace("卷", "时期")
                 fields.pop("chapter_start", None)
                 fields.pop("chapter_end", None)
                 continue
 
             if ctype == "volume":
-                if parent_id is None or _is_placeholder(parent_id):
-                    # 优先挂到本次新增的 period，否则保持原样让后端校验报错
-                    if default_period_id:
-                        fields["parent_id"] = default_period_id
+                parent_type = _get_type(parent_id) if parent_id else None
+                if parent_type != "period":
+                    chosen = _choose_period_for_volume(fields, parent_id)
+                    if chosen:
+                        fields["parent_id"] = chosen
+                    elif default_broad_id:
+                        # 没有可用 period，临时创建一个
+                        period_counter += 1
+                        tid = f"temp:period:{period_counter}"
+                        extra_periods.append({
+                            "action": "add",
+                            "temp_id": tid,
+                            "fields": {
+                                "title": f"时期 {period_counter}",
+                                "content": "自动创建的中间时期节点",
+                                "type": "period",
+                                "parent_id": default_broad_id,
+                            },
+                        })
+                        broad_to_periods.setdefault(default_broad_id, []).append(tid)
+                        fields["parent_id"] = tid
                 continue
+
+        if extra_periods:
+            changes.extend(extra_periods)
 
         # 保证顺序：broad -> period -> volume，同层保持原序
         type_order = {"broad": 0, "period": 1, "volume": 2}
