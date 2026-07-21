@@ -421,7 +421,8 @@ class PlotWorker(WorkerBase):
 
     async def run(self, goal: str, context: dict, history_context: list[dict] | None = None) -> dict:
         related = ""
-        if context.get("project_id"):
+        project_id = context.get("project_id")
+        if project_id:
             builder = ContextBuilder(self.db, self.llm, entities=build_entities_from_context(context))
             related = await builder.build(
                 goal,
@@ -429,15 +430,81 @@ class PlotWorker(WorkerBase):
                 focus_entity_id=context.get("entity_id"),
             )
 
+        plots = context.get("plot") or []
+        plots_desc = "\n".join(
+            f"- {p.get('title')} (id={p.get('id')})"
+            for p in plots
+        ) or "暂无现有剧情节点。"
+        existing_ids = {p.get("id") for p in plots if p.get("id")}
+
         system = (
-            "你是剧情节点编排师。使用只读工具 read_plot_nodes / read_outlines 取数，"
-            '返回 JSON：{"changes":[{"action":"add|update","entity_id":null或id,'
-            '"fields":{"title":"","summary":"","timeline_pos":""}}]}。\n\n'
-            "参考【相关上下文】保持剧情节点与角色、大纲、伏笔一致。\n"
-            "若需调用工具，请输出 TOOL_CALL:{\"name\":\"read_plot_nodes\",\"arguments\":{\"project_id\":\"...\"}}"
+            "你是剧情节点编排师。基于用户目标新增或调整剧情节点（plot_node），最终只返回合法 JSON，不要 markdown 代码块，不要解释："
+            '{"changes":[{"action":"add|update","entity_id":null或id,"fields":{"title":"","summary":"","timeline_pos":""}}]}\n\n'
+            "重要规则：\n"
+            "1. 只操作剧情节点（plot_node）实体，严禁修改角色（character）、世界观（world）、大纲（outline）、伏笔（foreshadow）的 id。\n"
+            "2. 新增剧情节点时必须使用 action='add' 且 entity_id=null。\n"
+            "3. 若用户目标中的剧情节点 title 与【现有剧情节点】完全相同，才使用 action='update' 并填写对应 id。\n"
+            "4. 不要创建与现有剧情节点 title 重复的条目。\n"
+            "5. fields 必须包含 title 和 summary；timeline_pos 可为空，常用值如 开篇/发展/高潮/结局 或自定义位置。\n"
+            "6. 参考【相关上下文】保持剧情节点与角色、大纲、伏笔一致。\n"
+            f"若需调用工具进一步了解，请输出 TOOL_CALL:{{\"name\":\"read_plot_nodes\",\"arguments\":{{\"project_id\":\"{project_id}\"}}}}"
         )
-        user_prompt = f"【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
-        return await self._tool_loop(system, user_prompt, history_context=history_context)
+        user_prompt = (
+            f"【现有剧情节点】\n{plots_desc}\n\n"
+            f"【相关上下文】\n{related or '（无）'}\n\n"
+            f"【用户目标】\n{goal}"
+        )
+        raw = await self._tool_loop(system, user_prompt, history_context=history_context)
+        return self._normalize_plot_changes(raw, existing_ids)
+
+    @staticmethod
+    def _normalize_plot_changes(raw: dict, existing_ids: set[str]) -> dict:
+        """过滤非剧情节点变更、修正 entity_id、统一实体类型。"""
+        plot_field_keys = {"title", "summary", "timeline_pos"}
+        other_entity_fields = {
+            "traits", "ability", "status", "relations", "importance",  # character
+            "category", "content",  # world/outline
+            "state", "subplot_id",  # foreshadow
+            "type", "parent_id", "chapter_start", "chapter_end",  # outline
+        }
+        changes: list[dict] = []
+        for ch in raw.get("changes") or []:
+            if not isinstance(ch, dict):
+                continue
+            fields = ch.get("fields") or {}
+            if not fields:
+                continue
+            # 必须包含剧情节点字段
+            if not any(k in fields for k in plot_field_keys):
+                logger.warning("PlotWorker 返回非剧情节点字段，已过滤: %s", ch)
+                continue
+            # 如果包含其他实体专属字段，说明这是角色/大纲/世界观的更新，不能当成剧情节点
+            if any(k in fields for k in other_entity_fields):
+                logger.warning("PlotWorker 返回混有非剧情节点字段的变更，已过滤: %s", ch)
+                continue
+
+            entity_id = ch.get("entity_id")
+            action = ch.get("action", "add")
+            title = fields.get("title")
+
+            # update 的 id 不在现有剧情节点中 -> 视为新增
+            if action == "update" and entity_id and entity_id not in existing_ids:
+                logger.warning(
+                    "PlotWorker 尝试更新不存在的剧情节点 id=%s，title=%s，已转为新增",
+                    entity_id,
+                    title,
+                )
+                action = "add"
+                entity_id = None
+
+            changes.append({
+                "action": action,
+                "entity_id": entity_id,
+                "entity_type": "plot",
+                "fields": {k: fields[k] for k in plot_field_keys if k in fields},
+            })
+
+        return {"changes": changes, "stage": "plot"}
 
 
 class ForeshadowWorker(WorkerBase):
