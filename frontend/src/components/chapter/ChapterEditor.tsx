@@ -13,11 +13,13 @@ interface ChapterEditorProps {
 export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEditorProps) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [order, setOrder] = useState(1);
 
   useEffect(() => {
     if (chapter) {
       setTitle(chapter.title || "");
       setContent(chapter.content || "");
+      setOrder((chapter.order ?? 0) + 1);
     }
   }, [chapter?.id]);
 
@@ -30,7 +32,7 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
   }
 
   const handleSave = () => {
-    onSave(chapter.id, { title, content });
+    onSave(chapter.id, { title, content, order: order - 1 });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -53,9 +55,20 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-3 flex items-center gap-3">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted">第</span>
+          <Input
+            type="number"
+            min={1}
+            value={order}
+            onChange={(e) => setOrder(Number(e.target.value))}
+            className="w-16 text-center"
+          />
+          <span className="text-sm text-muted">章</span>
+        </div>
         <Input
-          className="flex-1"
+          className="min-w-0 flex-1"
           placeholder="章节标题"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
@@ -98,7 +111,6 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
 
       <div className="mt-3 flex items-center justify-between text-xs text-muted">
         <span>状态：{chapter.status || "draft"}</span>
-        <span>顺序：{chapter.order}</span>
       </div>
     </div>
   );

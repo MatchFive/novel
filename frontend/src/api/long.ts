@@ -35,6 +35,4 @@ export const longApi = {
   addChapter: (data: any) => api.post("/long/chapters", data),
   updateChapter: (id: string, data: any) => api.put(`/long/chapters/${id}`, data),
   deleteChapter: (id: string) => api.delete(`/long/chapters/${id}`),
-  reorderChapters: (project_id: string, chapter_ids: string[]) =>
-    api.post("/long/chapters/reorder", { project_id, chapter_ids }),
 };

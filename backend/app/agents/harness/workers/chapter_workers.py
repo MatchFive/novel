@@ -434,11 +434,9 @@ class ChapterTextWorker(WorkerBase):
 
         # —— 分段连续生成 ——
         segments: list[str] = []
-        max_segments = target_words // 800 + 2
+        max_segments = max(target_words // 800 + 3, 10)
         for i in range(1, max_segments + 1):
             accumulated = sum(len(s) for s in segments)
-            if accumulated >= target_words:
-                break
             user = chapter_segment_user_prompt(
                 segment_index=i,
                 accumulated_words=accumulated,

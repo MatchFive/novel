@@ -124,6 +124,7 @@ function ChapterPanel({ pid }: { pid: string }) {
   const [undoable, setUndoable] = useState(false);
   const generating = useAssistantSession((s) => s.busy);
   const chaptersVersion = useAssistantSession((s) => s.chaptersVersion);
+  const entitiesVersion = useAssistantSession((s) => s.entitiesVersion);
   const detailReqIdRef = useRef<number>(0);
   const { confirm, dialog } = useConfirm();
 
@@ -181,6 +182,15 @@ function ChapterPanel({ pid }: { pid: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chaptersVersion]);
 
+  // 应用/拒绝变更后刷新章节数据
+  useEffect(() => {
+    if (entitiesVersion > 0) {
+      loadItems();
+      if (selectedId) loadDetail(selectedId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entitiesVersion]);
+
   // 选中章节的撤销可用性
   useEffect(() => {
     setUndoable(false);
@@ -215,14 +225,20 @@ function ChapterPanel({ pid }: { pid: string }) {
     setSelectedId(id);
   };
 
-  const handleAdd = async (title: string) => {
+  const handleAdd = async (title: string, order?: number) => {
     clearError();
     try {
+      const nextOrder =
+        typeof order === "number" && !Number.isNaN(order)
+          ? order - 1
+          : items.length > 0
+            ? Math.max(...items.map((c) => c.order ?? 0)) + 1
+            : 0;
       const { data } = await longApi.addChapter({
         project_id: pid,
         title,
         content: "",
-        order: items.length,
+        order: nextOrder,
       });
       await loadItems();
       setSelectedId(data.id);
@@ -237,24 +253,6 @@ function ChapterPanel({ pid }: { pid: string }) {
     try {
       await longApi.deleteChapter(id);
       if (selectedId === id) setSelectedId(null);
-      await loadItems();
-    } catch (e) {
-      showError(e);
-    }
-  };
-
-  const handleMove = async (id: string, direction: -1 | 1) => {
-    clearError();
-    const sortedItems = [...items].sort((a, b) => a.order - b.order);
-    const index = sortedItems.findIndex((c) => c.id === id);
-    if (index === -1) return;
-    const newIndex = index + direction;
-    if (newIndex < 0 || newIndex >= sortedItems.length) return;
-    const [moved] = sortedItems.splice(index, 1);
-    sortedItems.splice(newIndex, 0, moved);
-    const newIds = sortedItems.map((c) => c.id);
-    try {
-      await longApi.reorderChapters(pid, newIds);
       await loadItems();
     } catch (e) {
       showError(e);
@@ -303,8 +301,8 @@ function ChapterPanel({ pid }: { pid: string }) {
               selectedId={selectedId}
               onSelect={handleSelect}
               onAdd={handleAdd}
+              onSave={handleSave}
               onDelete={handleDelete}
-              onMove={handleMove}
               onGenerate={handleGenerate}
               generating={generating}
             />
