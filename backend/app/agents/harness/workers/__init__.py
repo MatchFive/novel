@@ -242,11 +242,14 @@ class OutlineWorker(WorkerBase):
         system = (
             "你是大纲架构师。根据项目摘要、现有大纲、角色、世界观和剧情节点，生成或更新大纲。"
             "必须以合法 JSON 返回，不要 markdown 代码块，不要解释：\n"
-            '{"changes":[{"action":"add|update","entity_id":null或id,"fields":{'
+            '{"changes":[{"action":"add|update","entity_id":null或id,"temp_id":"temp:broad:1（新增总纲时必填）",'
+            '"fields":{'
             '"title":"","content":"","type":"broad|period|volume","parent_id":null,"chapter_start":null,"chapter_end":null}}]}\n\n'
             "业务规则：\n"
             "- 大纲为三级树：总纲 broad（顶层，无父级）、时期 period（父级必须是 broad）、卷 volume（父级必须是 period）。\n"
             "- 新增 period 时，parent_id 必须指向一个 broad 节点；新增 volume 时，parent_id 必须指向一个 period 节点。\n"
+            "- 如果一次返回里同时新增总纲和它的子节点，总纲必须设置 temp_id（如 \"temp:broad:1\"），"
+            "子节点的 parent_id 必须直接引用该 temp_id。禁止使用 <broad_id>、<period_id> 这类占位符。\n"
             "- 更新现有大纲时，优先只修改 title、content、chapter_start、chapter_end；不要改动 type 和 parent_id，除非用户明确要求移动层级。\n"
             "- chapter_start/chapter_end 仅 volume 可填，表示该卷覆盖的章节范围；1-based，且 start <= end。\n"
             "- 若用户目标涉及已有大纲，优先使用 action='update' 并填写其 id。\n"
@@ -312,6 +315,7 @@ class OutlineWorker(WorkerBase):
                     continue
                 filtered_changes.append(ch)
 
+            filtered_changes = self._normalize_outline_changes(filtered_changes, existing_outlines)
             return {"changes": filtered_changes, "stage": "outline"}
         except AppError:
             raise
@@ -336,6 +340,80 @@ class OutlineWorker(WorkerBase):
                 if eid:
                     mapping[str(eid)] = entity_type
         return mapping
+
+    @staticmethod
+    def _normalize_outline_changes(changes: list[dict], existing_outlines: list[dict]) -> list[dict]:
+        """修正新增大纲的 temp_id、占位父节点、字段合法性，并保证 broad/period/volume 顺序。"""
+        existing_ids = {str(o.get("id")) for o in existing_outlines if o.get("id")}
+        broad_root_ids = [
+            str(o.get("id"))
+            for o in existing_outlines
+            if o.get("type") == "broad" and not o.get("parent_id")
+        ]
+
+        # 给新增 broad 分配 temp_id
+        broad_temp_ids: list[str] = []
+        broad_counter = 0
+        for ch in changes:
+            if ch.get("action") != "add":
+                continue
+            fields = ch.get("fields") or {}
+            if fields.get("type") == "broad" and not ch.get("temp_id"):
+                broad_counter += 1
+                tid = f"temp:broad:{broad_counter}"
+                ch["temp_id"] = tid
+                broad_temp_ids.append(tid)
+
+        # 优先用本次新增的总纲作为 period 父级；否则用已有 broad 根节点
+        default_broad_id = broad_temp_ids[0] if broad_temp_ids else (broad_root_ids[0] if broad_root_ids else None)
+
+        # 给新增 period 分配 temp_id（volume 可能需要引用）
+        period_temp_ids: list[str] = []
+        period_counter = 0
+        for ch in changes:
+            if ch.get("action") != "add":
+                continue
+            fields = ch.get("fields") or {}
+            if fields.get("type") == "period" and not ch.get("temp_id"):
+                period_counter += 1
+                tid = f"temp:period:{period_counter}"
+                ch["temp_id"] = tid
+                period_temp_ids.append(tid)
+        default_period_id = period_temp_ids[0] if period_temp_ids else None
+
+        def _is_placeholder(value) -> bool:
+            return isinstance(value, str) and ("<" in value or ">" in value or value not in existing_ids and not value.startswith("temp:"))
+
+        for ch in changes:
+            fields = ch.get("fields") or {}
+            ctype = fields.get("type") or ""
+            parent_id = fields.get("parent_id")
+
+            if ctype == "broad":
+                fields["parent_id"] = None
+                fields.pop("chapter_start", None)
+                fields.pop("chapter_end", None)
+                continue
+
+            if ctype == "period":
+                if parent_id is None or _is_placeholder(parent_id):
+                    if default_broad_id:
+                        fields["parent_id"] = default_broad_id
+                fields.pop("chapter_start", None)
+                fields.pop("chapter_end", None)
+                continue
+
+            if ctype == "volume":
+                if parent_id is None or _is_placeholder(parent_id):
+                    # 优先挂到本次新增的 period，否则保持原样让后端校验报错
+                    if default_period_id:
+                        fields["parent_id"] = default_period_id
+                continue
+
+        # 保证顺序：broad -> period -> volume，同层保持原序
+        type_order = {"broad": 0, "period": 1, "volume": 2}
+        changes.sort(key=lambda c: type_order.get((c.get("fields") or {}).get("type"), 9))
+        return changes
 
 
 class PlotWorker(WorkerBase):
