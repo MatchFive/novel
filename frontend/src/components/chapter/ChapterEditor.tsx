@@ -14,6 +14,7 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [order, setOrder] = useState(1);
+  const [showOutline, setShowOutline] = useState(true);
 
   useEffect(() => {
     if (chapter) {
@@ -26,7 +27,7 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
   if (!chapter) {
     return (
       <div className="flex h-full items-center justify-center">
-        <Empty text="在左侧选择或新增一个章节以开始编辑" />
+        <Empty text="在左侧目录选择或新增一个章节开始编辑" />
       </div>
     );
   }
@@ -44,10 +45,7 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
 
   const handleGenerate = (type: "outline" | "text") => {
     const chapterLabel = `第 ${chapter.order + 1} 章${chapter.title ? `《${chapter.title}》` : ""}`;
-    const text =
-      type === "outline"
-        ? `生成${chapterLabel}细纲`
-        : `生成${chapterLabel}正文`;
+    const text = type === "outline" ? `生成${chapterLabel}细纲` : `生成${chapterLabel}正文`;
     const context = { entity_type: "chapter", entity_id: chapter.id };
     useAssistantSession.getState().openAssistant();
     useAssistantSession.getState().sendMessage(chapter.project_id, text, context);
@@ -55,44 +53,45 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-3 flex flex-wrap items-center gap-3">
+      {/* 顶部工具栏 */}
+      <div className="mb-3 flex flex-wrap items-center gap-3 border-b border-line pb-3">
         <div className="flex items-center gap-2">
           <span className="text-sm text-muted">第</span>
           <Input
             type="number"
             min={1}
             value={order}
-            onChange={(e) => setOrder(Number(e.target.value))}
-            className="w-16 text-center"
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (!Number.isNaN(v) && v >= 1) setOrder(v);
+            }}
+            className="w-14 text-center"
           />
           <span className="text-sm text-muted">章</span>
         </div>
+
         <Input
-          className="min-w-0 flex-1"
+          className="min-w-0 flex-1 font-serif text-base"
           placeholder="章节标题"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
-        <Button variant="primary" onClick={handleSave}>
-          保存
-        </Button>
-        <Button variant="ghost" onClick={() => handleGenerate("outline")}>
-          生成细纲
-        </Button>
-        <Button variant="ghost" onClick={() => handleGenerate("text")}>
-          生成正文
-        </Button>
-        {undoable && onUndo && (
-          <Button variant="ghost" onClick={onUndo}>
-            撤销生成
-          </Button>
-        )}
+
+        <div className="flex shrink-0 items-center gap-1">
+          <Button variant="primary" onClick={handleSave}>保存</Button>
+          <Button variant="ghost" onClick={() => handleGenerate("outline")}>生成细纲</Button>
+          <Button variant="ghost" onClick={() => handleGenerate("text")}>生成正文</Button>
+          {undoable && onUndo && (
+            <Button variant="ghost" onClick={onUndo}>撤销</Button>
+          )}
+        </div>
       </div>
 
-      <div className="flex-1">
+      {/* 正文区 */}
+      <div className="min-h-0 flex-1">
         <Textarea
-          className="h-full min-h-[300px] resize-none"
-          placeholder="开始写作…"
+          className="h-full resize-none bg-paper leading-relaxed"
+          placeholder="在此书写正文…"
           rows={20}
           value={content}
           onChange={(e) => setContent(e.target.value)}
@@ -100,17 +99,29 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
         />
       </div>
 
+      {/* 细纲折叠面板 */}
       {chapter.detailed_outline && (
-        <Card className="mt-3 p-3">
-          <div className="mb-1 text-xs font-medium text-muted">细纲</div>
-          <div className="max-h-40 overflow-auto whitespace-pre-wrap text-sm text-ink">
-            {chapter.detailed_outline}
-          </div>
+        <Card className="mt-3 overflow-hidden">
+          <button
+            onClick={() => setShowOutline((s) => !s)}
+            className="flex w-full items-center justify-between px-3 py-2 text-left text-sm font-medium text-ink hover:bg-surface-2"
+          >
+            <span>本章细纲</span>
+            <span className="text-xs text-muted">{showOutline ? "收起" : "展开"}</span>
+          </button>
+          {showOutline && (
+            <div className="max-h-48 overflow-auto border-t border-line px-3 py-2">
+              <div className="whitespace-pre-wrap text-sm leading-relaxed text-ink-soft">
+                {chapter.detailed_outline}
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
-      <div className="mt-3 flex items-center justify-between text-xs text-muted">
-        <span>状态：{chapter.status || "draft"}</span>
+      <div className="mt-2 flex items-center justify-between text-xs text-muted">
+        <span>字数：{content.length}</span>
+        <span>状态：{chapter.status === "generated" ? "已生成" : chapter.status === "reviewed" ? "已细纲" : "草稿"}</span>
       </div>
     </div>
   );

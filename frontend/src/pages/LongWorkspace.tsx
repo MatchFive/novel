@@ -292,9 +292,10 @@ function ChapterPanel({ pid }: { pid: string }) {
       {dialog}
       <SectionTitle>章节</SectionTitle>
       <div className="mt-4 flex h-0 flex-1 gap-4">
-        <div className="flex w-72 flex-col border border-line bg-surface p-3">
+        <div className="flex w-64 flex-col overflow-hidden border border-line bg-surface">
+          <div className="border-b border-line px-3 py-2 text-sm font-medium text-ink-soft">目录</div>
           {itemsLoading ? (
-            <div className="text-sm text-muted">加载中…</div>
+            <div className="p-3 text-sm text-muted">加载中…</div>
           ) : (
             <ChapterList
               items={items}
@@ -308,7 +309,7 @@ function ChapterPanel({ pid }: { pid: string }) {
             />
           )}
         </div>
-        <div className="relative flex flex-1 flex-col border border-line bg-surface p-3">
+        <div className="relative flex flex-1 flex-col border border-line bg-surface p-4">
           {error && (
             <div className="mb-3 border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
               {error}
