@@ -222,6 +222,7 @@ ${_json_rules}
 - 必须严格遵循【细纲】的场景列表和情节顺序，逐一场景完整写入正文，不得遗漏、跳跃或提前结束。
 - 本章目标约 $target_words 字（允许 ±20% 浮动）。
 - 正文将采用分段连续写作：每次调用只写一段，需与【上一段尾部】自然衔接（由用户消息提供），并在确认细纲所有场景均已完整呈现前，不要设置 finished=true。
+- **主角认知边界**：主角只能知道本章正文、前文尾部以及本章内已呈现信息。严禁在开头就让主角知道尚未交代的设定（如匪帮、敌对势力、人物背景、隐藏关系等）。系统面板数据可以被主角看到，但主角对数据的解读只能基于当前已知信息，不能加入未经验证的推断或全局设定。
 
 输入数据：
 【目标章节】
@@ -254,7 +255,7 @@ $active_foreshadows
 )
 
 CHAPTER_REVIEW_PROMPT_TEMPLATE = Template(
-    """你是小说审校员。检查以下章节正文是否存在物理逻辑、人物一致性或伏笔呼应问题。
+    """你是小说审校员。检查以下章节正文是否存在逻辑、人物一致性或伏笔呼应问题。
 
 ${_json_rules}
 
@@ -262,13 +263,19 @@ ${_json_rules}
 - 若无问题：{"ok": true}
 - 若有问题：{"ok": false, "issues": ["问题1", "问题2"]}
 
-业务规则：
-- 只关注 critical 问题（明显违反前文设定、伏笔未呼应、物理逻辑硬伤）。
+业务规则（只关注 critical 问题）：
+- 物理逻辑硬伤。
+- 人物言行、能力、关系与已有设定冲突。
+- 伏笔未呼应或错误呼应。
+- **主角认知越界**：主角知道了正文、前文尾部以及本章已呈现信息之外的内容。例如第一章主角尚未接触到匪帮，就不能在心里说“周围还有匪帮虎视眈眈”；主角不能通过系统面板看到面板未显示的信息，也不能做出超出当前认知的推断。
 - 文风、篇幅问题不列入 issues。
 
 输入数据：
 【章节信息】
 $chapter
+
+【前文尾部】
+$previous_chapter_text_tail
 
 【正文】
 $chapter_text
@@ -392,6 +399,7 @@ def CHAPTER_REVIEW_PROMPT(
     characters: list[dict],
     world: list[dict],
     active_foreshadows: list[dict],
+    previous_chapter_text_tail: str = "（无）",
 ) -> str:
     return CHAPTER_REVIEW_PROMPT_TEMPLATE.substitute(
         _json_rules=_JSON_RULES,
@@ -400,6 +408,7 @@ def CHAPTER_REVIEW_PROMPT(
         characters=_dumps(characters),
         world=_dumps(world),
         active_foreshadows=_dumps(active_foreshadows),
+        previous_chapter_text_tail=previous_chapter_text_tail or "（无）",
     )
 
 
@@ -476,6 +485,7 @@ def chapter_review_prompt(context: dict) -> str:
         characters=context.get("characters") or [],
         world=context.get("world") or [],
         active_foreshadows=context.get("active_foreshadows") or [],
+        previous_chapter_text_tail=context.get("previous_chapter_text_tail", "") or "（无）",
     )
 
 

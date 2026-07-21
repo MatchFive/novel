@@ -547,7 +547,7 @@ class ChapterTextWorker(WorkerBase):
             return {"changes": [], "stage": "chapter_text", "error": "正文生成失败", "notes": notes}
 
         # —— 一致性审校：发现问题带反馈重写一次 ——
-        review_issues = await self._review_text(content, chapter, characters, world, active)
+        review_issues = await self._review_text(content, chapter, characters, world, active, previous_chapter_text_tail=prev_tail)
         if review_issues:
             rewritten = await self._rewrite_with_feedback(system, history_context, content, review_issues)
             if rewritten:
@@ -620,6 +620,7 @@ class ChapterTextWorker(WorkerBase):
         characters: list[dict],
         world: list[dict],
         active_foreshadows: list[dict],
+        previous_chapter_text_tail: str = "",
     ) -> list[str]:
         if not content:
             return []
@@ -629,6 +630,7 @@ class ChapterTextWorker(WorkerBase):
             "characters": characters,
             "world": world,
             "active_foreshadows": active_foreshadows,
+            "previous_chapter_text_tail": previous_chapter_text_tail,
         })
         try:
             raw = await self.llm.parse_llm_json([{"role": "system", "content": system}])
