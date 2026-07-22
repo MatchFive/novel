@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Button, Input, Textarea, Card, Empty } from "@/components/ui";
 import { useAssistantSession } from "@/stores/useAssistantSession";
-import type { Chapter } from "@/types";
+import { longApi } from "@/api/long";
+import type { Chapter, CharacterMemoryDraft } from "@/types";
 
 interface ChapterEditorProps {
   chapter: Chapter | null;
@@ -15,6 +16,9 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
   const [content, setContent] = useState("");
   const [order, setOrder] = useState(1);
   const [showOutline, setShowOutline] = useState(true);
+  const [drafts, setDrafts] = useState<CharacterMemoryDraft[]>([]);
+  const [draftsOpen, setDraftsOpen] = useState(false);
+  const [draftLoading, setDraftLoading] = useState(false);
 
   useEffect(() => {
     if (chapter) {
@@ -51,6 +55,37 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
     useAssistantSession.getState().sendMessage(chapter.project_id, text, context);
   };
 
+  const handleExtractMemory = async () => {
+    if (!chapter) return;
+    setDraftLoading(true);
+    try {
+      const res = await longApi.extractMemory(chapter.id);
+      if (res.data.skipped) {
+        const ok = window.confirm(res.data.message || "本章记忆已是最新，是否重新提取？");
+        if (!ok) return;
+        return;
+      }
+      setDrafts(res.data.drafts || []);
+      setDraftsOpen(true);
+    } finally {
+      setDraftLoading(false);
+    }
+  };
+
+  const handleApplyDrafts = async () => {
+    if (!chapter) return;
+    await longApi.applyMemoryDrafts(chapter.id);
+    setDrafts([]);
+    setDraftsOpen(false);
+  };
+
+  const handleDiscardDrafts = async () => {
+    if (!chapter) return;
+    await longApi.discardMemoryDrafts(chapter.id);
+    setDrafts([]);
+    setDraftsOpen(false);
+  };
+
   return (
     <div className="flex h-full flex-col">
       {/* 顶部工具栏 */}
@@ -81,6 +116,9 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
           <Button variant="primary" onClick={handleSave}>保存</Button>
           <Button variant="ghost" onClick={() => handleGenerate("outline")}>生成细纲</Button>
           <Button variant="ghost" onClick={() => handleGenerate("text")}>生成正文</Button>
+          <Button variant="ghost" onClick={handleExtractMemory} disabled={draftLoading}>
+            {draftLoading ? "提取中..." : "更新记忆"}
+          </Button>
           {undoable && onUndo && (
             <Button variant="ghost" onClick={onUndo}>撤销</Button>
           )}
@@ -123,6 +161,42 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
         <span>字数：{content.length}</span>
         <span>状态：{chapter.status === "generated" ? "已生成" : chapter.status === "reviewed" ? "已细纲" : "草稿"}</span>
       </div>
+
+      {draftsOpen && (
+        <div className="mt-4 border border-line bg-paper p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium">本章记忆候选</span>
+            <div className="flex gap-2">
+              <Button variant="primary" onClick={handleApplyDrafts}>确认应用</Button>
+              <Button variant="ghost" onClick={handleDiscardDrafts}>取消</Button>
+            </div>
+          </div>
+          {drafts.length === 0 ? (
+            <div className="text-sm text-muted">没有候选记忆</div>
+          ) : (
+            <div className="space-y-3">
+              {Object.entries(
+                drafts.reduce((acc, d) => {
+                  (acc[d.character_id] = acc[d.character_id] || []).push(d);
+                  return acc;
+                }, {} as Record<string, CharacterMemoryDraft[]>)
+              ).map(([characterId, items]) => (
+                <div key={characterId} className="border-t border-line pt-2">
+                  <div className="mb-1 text-sm font-medium">角色 ID: {characterId}</div>
+                  <ul className="space-y-1">
+                    {items.map((d) => (
+                      <li key={d.id} className="text-sm text-ink-soft">
+                        <span className="font-medium">[{d.action}]</span> {d.content}
+                        <span className="ml-2 text-xs text-muted">({d.importance}, {d.ttl})</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
