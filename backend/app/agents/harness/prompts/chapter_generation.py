@@ -261,6 +261,9 @@ $previous_summaries
 
 【活跃伏笔】
 $active_foreshadows
+
+【角色记忆】
+$character_memories
 """
 )
 
@@ -387,6 +390,7 @@ def CHAPTER_TEXT_PROMPT(
     previous_summaries: str = "（无）",
     target_words: int = 2500,
     volume_outline: str = "（暂无卷大纲）",
+    character_memories: dict[str, list[dict]] | None = None,
 ) -> str:
     return CHAPTER_TEXT_PROMPT_TEMPLATE.substitute(
         _json_rules=_JSON_RULES,
@@ -400,6 +404,7 @@ def CHAPTER_TEXT_PROMPT(
         active_foreshadows=_dumps(active_foreshadows),
         previous_summaries=previous_summaries or "（无）",
         target_words=target_words,
+        character_memories=_dumps(character_memories or {}),
     )
 
 
@@ -484,6 +489,7 @@ def chapter_text_prompt(context: dict) -> str:
         previous_summaries=context.get("previous_summaries", "") or "（无）",
         target_words=context.get("target_words") or 2500,
         volume_outline=context.get("volume_outline", "") or "（暂无卷大纲）",
+        character_memories=context.get("character_memories") or {},
     )
 
 
