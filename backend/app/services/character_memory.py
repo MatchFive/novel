@@ -5,11 +5,13 @@ import hashlib
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories as repo
-from app.core.errors import NotFoundError, ValidationError
-from app.core.llm_client import LLMClient
+from app.core.errors import NotFoundError
+from app.core.llm_factory import get_llm_client
+from app.models import LongCharacterMemory, LongCharacterMemoryDraft, LongChapterMemoryExtraction
 from app.services.prompts.character_memory import memory_extraction_prompt
 
 logger = logging.getLogger(__name__)
@@ -24,8 +26,8 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]
 
 
-def _row_to_dict(row) -> dict:
-    return {c.name: getattr(row, c.name) for c in row.__table__.columns}
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _normalize_memory_payload(raw: dict, existing_ids: set[str]) -> dict | None:
@@ -66,9 +68,13 @@ def _normalize_memory_payload(raw: dict, existing_ids: set[str]) -> dict | None:
     }
 
 
-def _detect_character_appearances(chapter_text: str, characters: list[dict]) -> list[dict]:
-    """基于角色姓名在正文中的出现次数识别本章出场角色。"""
-    text = chapter_text or ""
+def _detect_character_appearances(chapter: dict, characters: list[dict]) -> list[dict]:
+    """基于章节正文/细纲中角色姓名出现次数识别本章出场角色。"""
+    text_parts = [
+        chapter.get("content", ""),
+        chapter.get("detailed_outline", ""),
+    ]
+    text = "\n".join(str(p) for p in text_parts if p)
     appeared = []
     for c in characters:
         name = c.get("name", "").strip()
@@ -82,10 +88,9 @@ def _detect_character_appearances(chapter_text: str, characters: list[dict]) -> 
 
 
 async def extract_memory_drafts(db: AsyncSession, chapter_id: str) -> dict:
-    chapter_row = await repo.get_chapter(db, chapter_id)
-    if not chapter_row:
+    chapter = await repo.get_chapter(db, chapter_id)
+    if not chapter:
         raise NotFoundError("章节不存在")
-    chapter = _row_to_dict(chapter_row)
 
     project_id = chapter.get("project_id")
     content = chapter.get("content") or ""
@@ -105,7 +110,7 @@ async def extract_memory_drafts(db: AsyncSession, chapter_id: str) -> dict:
 
     characters = await repo.list_characters(db, project_id)
     foreshadows = await repo.list_foreshadows(db, project_id)
-    appeared_characters = _detect_character_appearances(content, characters)
+    appeared_characters = _detect_character_appearances(chapter, characters)
 
     if not appeared_characters:
         await repo.set_chapter_memory_extraction(db, chapter_id, current_hash, 0)
@@ -116,7 +121,7 @@ async def extract_memory_drafts(db: AsyncSession, chapter_id: str) -> dict:
             "grouped_by_character": {},
         }
 
-    llm = LLMClient()
+    llm = await get_llm_client(db, level="medium")
 
     all_drafts: list[dict] = []
     for character in appeared_characters:
@@ -183,53 +188,70 @@ async def apply_memory_drafts(db: AsyncSession, chapter_id: str) -> dict:
     if not drafts:
         return {"ok": True, "applied": {"created": 0, "updated": 0, "deleted": 0}}
 
-    chapter_row = await repo.get_chapter(db, chapter_id)
-    if not chapter_row:
+    chapter = await repo.get_chapter(db, chapter_id)
+    if not chapter:
         raise NotFoundError("章节不存在")
-    chapter = _row_to_dict(chapter_row)
 
     created = updated = deleted = 0
-    for draft in drafts:
-        action = draft.get("action")
-        if action == "add":
-            await repo.create_character_memory(db, {
-                "project_id": draft.get("project_id"),
-                "character_id": draft.get("character_id"),
-                "content": draft.get("content"),
-                "importance": draft.get("importance"),
-                "ttl": draft.get("ttl"),
-                "source_chapter_id": chapter_id,
-                "source_type": "auto",
-                "related_character_ids": draft.get("related_character_ids") or [],
-                "related_foreshadow_ids": draft.get("related_foreshadow_ids") or [],
-            })
-            created += 1
-        elif action == "update":
-            target = draft.get("target_memory_id")
-            if target:
-                await repo.update_character_memory(db, target, {
-                    "content": draft.get("content"),
-                    "importance": draft.get("importance"),
-                    "ttl": draft.get("ttl"),
-                    "related_character_ids": draft.get("related_character_ids") or [],
-                    "related_foreshadow_ids": draft.get("related_foreshadow_ids") or [],
-                    "source_chapter_id": chapter_id,
-                    "source_type": "auto",
-                })
-                updated += 1
-        elif action == "delete":
-            target = draft.get("target_memory_id")
-            if target:
-                await repo.delete_character_memory(db, target)
-                deleted += 1
+    try:
+        for draft in drafts:
+            action = draft.get("action")
+            if action == "add":
+                db.add(LongCharacterMemory(
+                    project_id=draft.get("project_id"),
+                    character_id=draft.get("character_id"),
+                    content=draft.get("content"),
+                    importance=draft.get("importance"),
+                    ttl=draft.get("ttl"),
+                    source_chapter_id=chapter_id,
+                    source_type="auto",
+                    related_character_ids=draft.get("related_character_ids") or [],
+                    related_foreshadow_ids=draft.get("related_foreshadow_ids") or [],
+                ))
+                created += 1
+            elif action == "update":
+                target = draft.get("target_memory_id")
+                if target:
+                    row = await db.get(LongCharacterMemory, target)
+                    if row:
+                        row.content = draft.get("content")
+                        row.importance = draft.get("importance")
+                        row.ttl = draft.get("ttl")
+                        row.related_character_ids = draft.get("related_character_ids") or []
+                        row.related_foreshadow_ids = draft.get("related_foreshadow_ids") or []
+                        row.source_chapter_id = chapter_id
+                        row.source_type = "auto"
+                        row.updated_at = _now()
+                        updated += 1
+            elif action == "delete":
+                target = draft.get("target_memory_id")
+                if target:
+                    row = await db.get(LongCharacterMemory, target)
+                    if row:
+                        await db.delete(row)
+                        deleted += 1
 
-    await repo.clear_character_memory_drafts(db, chapter_id)
-    await repo.set_chapter_memory_extraction(
-        db,
-        chapter_id,
-        _content_hash(chapter.get("content") or ""),
-        created + updated,
-    )
+        await db.execute(delete(LongCharacterMemoryDraft).where(LongCharacterMemoryDraft.chapter_id == chapter_id))
+
+        extraction = await db.get(LongChapterMemoryExtraction, chapter_id)
+        now = _now()
+        content_hash = _content_hash(chapter.get("content") or "")
+        if extraction is None:
+            db.add(LongChapterMemoryExtraction(
+                chapter_id=chapter_id,
+                content_hash=content_hash,
+                memory_count=created + updated,
+                extracted_at=now,
+            ))
+        else:
+            extraction.content_hash = content_hash
+            extraction.memory_count = created + updated
+            extraction.extracted_at = now
+
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
     return {
         "ok": True,

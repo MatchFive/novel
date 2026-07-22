@@ -242,12 +242,12 @@ class LongCharacterMemory(Base):
     __tablename__ = "long_character_memories"
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
-    project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
-    character_id = Column(CHAR(36), ForeignKey("long_characters.id"), nullable=False, index=True)
+    project_id = Column(CHAR(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    character_id = Column(CHAR(36), ForeignKey("long_characters.id", ondelete="CASCADE"), nullable=False, index=True)
     content = Column(Text, default="")
     importance = Column(String(16), default="major")
     ttl = Column(String(16), default="long")
-    source_chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id"), nullable=True, index=True)
+    source_chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id", ondelete="SET NULL"), nullable=True, index=True)
     source_type = Column(String(16), default="auto")
     related_character_ids = Column(JSON, default=list)
     related_foreshadow_ids = Column(JSON, default=list)
@@ -259,11 +259,11 @@ class LongCharacterMemoryDraft(Base):
     __tablename__ = "long_character_memory_drafts"
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
-    project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
-    chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id"), nullable=False, index=True)
-    character_id = Column(CHAR(36), ForeignKey("long_characters.id"), nullable=False, index=True)
+    project_id = Column(CHAR(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id", ondelete="CASCADE"), nullable=False, index=True)
+    character_id = Column(CHAR(36), ForeignKey("long_characters.id", ondelete="CASCADE"), nullable=False, index=True)
     action = Column(String(16), default="add")
-    target_memory_id = Column(CHAR(36), ForeignKey("long_character_memories.id"), nullable=True)
+    target_memory_id = Column(CHAR(36), ForeignKey("long_character_memories.id", ondelete="SET NULL"), nullable=True)
     content = Column(Text, default="")
     importance = Column(String(16), default="major")
     ttl = Column(String(16), default="long")
@@ -275,7 +275,7 @@ class LongCharacterMemoryDraft(Base):
 class LongChapterMemoryExtraction(Base):
     __tablename__ = "long_chapter_memory_extractions"
 
-    chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id"), primary_key=True)
+    chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id", ondelete="CASCADE"), primary_key=True)
     extracted_at = Column(DateTime, default=_now, nullable=False)
     content_hash = Column(String(64), nullable=False)
     memory_count = Column(Integer, default=0)

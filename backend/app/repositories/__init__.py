@@ -65,12 +65,6 @@ async def _delete(db: AsyncSession, model, row_id: str) -> bool:
     return True
 
 
-async def _row_to_dict(row) -> dict | None:
-    if row is None:
-        return None
-    return {c.name: getattr(row, c.name) for c in row.__table__.columns}
-
-
 # ---- Outlines ----
 async def list_outlines(db, project_id): return await _list(db, LongOutline, project_id)
 async def get_outline(db, rid): return await _get(db, LongOutline, rid)

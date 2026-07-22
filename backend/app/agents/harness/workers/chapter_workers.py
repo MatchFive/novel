@@ -29,17 +29,20 @@ logger = logging.getLogger(__name__)
 
 async def _character_memories_for_chapter(
     db,
-    chapter_text: str,
+    chapter: dict,
     characters: list[dict],
 ) -> dict[str, list[dict]]:
-    """为章节中出场的每个角色查询其已知记忆。"""
+    """为章节中出场的每个角色查询其已知记忆。基于正文和细纲判断出场。"""
     from app.agents.tools import read_character_memories
 
+    text = "\n".join(str(chapter.get(k) or "") for k in ("content", "detailed_outline"))
     appeared_names = {c.get("name", "").strip() for c in characters if c.get("name")}
     result: dict[str, list[dict]] = {}
     for c in characters:
         name = c.get("name", "").strip()
         if not name or name not in appeared_names:
+            continue
+        if name not in text:
             continue
         cid = c.get("id")
         memories = await read_character_memories(db, cid, limit=30)
@@ -523,7 +526,7 @@ class ChapterTextWorker(WorkerBase):
         volume_outline = _volume_outline_text(outlines, chapter_order)
 
         character_memories = await _character_memories_for_chapter(
-            self.db, chapter.get("content", ""), characters
+            self.db, chapter, characters
         )
 
         system = chapter_text_prompt({

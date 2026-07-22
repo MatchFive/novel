@@ -58,7 +58,7 @@ async def add_character_memory(character_id: str, body: dict, db: AsyncSession =
     if not character:
         raise NotFoundError("角色不存在")
     data = {
-        "project_id": character.get("project_id"),
+        "project_id": character.project_id,
         "character_id": character_id,
         "content": body.get("content", ""),
         "importance": body.get("importance", "major"),
