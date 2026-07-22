@@ -18,7 +18,7 @@ def _register_routers(app: FastAPI) -> None:
     # 延迟导入，避免循环依赖；S1+ 逐步填充
     from app.api import projects, settings as settings_api, short_story, hotspots
     from app.api import long_outline, long_character, long_foreshadow, long_world, long_plot, long_chapter
-    from app.api import assistant, long_continue, export, graph
+    from app.api import assistant, long_continue, long_memory, export, graph
     app.include_router(projects.router, prefix="/api/projects")
     app.include_router(settings_api.router, prefix="/api/settings")
     app.include_router(short_story.router, prefix="/api/short")
@@ -29,6 +29,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(long_world.router, prefix="/api/long")
     app.include_router(long_plot.router, prefix="/api/long")
     app.include_router(long_chapter.router, prefix="/api/long")
+    app.include_router(long_memory.router, prefix="/api/long")
     app.include_router(assistant.router, prefix="/api/assistant")
     app.include_router(long_continue.router, prefix="/api/long")
     app.include_router(export.router, prefix="/api/export")
