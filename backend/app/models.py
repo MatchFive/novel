@@ -184,6 +184,49 @@ class LongChapter(Base):
     constraints = Column(JSON, default=list)
 
 
+class LongCharacterMemory(Base):
+    __tablename__ = "long_character_memories"
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
+    character_id = Column(CHAR(36), ForeignKey("long_characters.id"), nullable=False, index=True)
+    content = Column(Text, default="")
+    importance = Column(String(16), default="major")
+    ttl = Column(String(16), default="long")
+    source_chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id"), nullable=True, index=True)
+    source_type = Column(String(16), default="auto")
+    related_character_ids = Column(JSON, default=list)
+    related_foreshadow_ids = Column(JSON, default=list)
+    created_at = Column(DateTime, default=_now, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+
+
+class LongCharacterMemoryDraft(Base):
+    __tablename__ = "long_character_memory_drafts"
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
+    chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id"), nullable=False, index=True)
+    character_id = Column(CHAR(36), ForeignKey("long_characters.id"), nullable=False, index=True)
+    action = Column(String(16), default="add")
+    target_memory_id = Column(CHAR(36), ForeignKey("long_character_memories.id"), nullable=True)
+    content = Column(Text, default="")
+    importance = Column(String(16), default="major")
+    ttl = Column(String(16), default="long")
+    related_character_ids = Column(JSON, default=list)
+    related_foreshadow_ids = Column(JSON, default=list)
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+
+class LongChapterMemoryExtraction(Base):
+    __tablename__ = "long_chapter_memory_extractions"
+
+    chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id"), primary_key=True)
+    extracted_at = Column(DateTime, default=_now, nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    memory_count = Column(Integer, default=0)
+
+
 class LongChangeRecord(Base):
     __tablename__ = "long_change_records"
 
