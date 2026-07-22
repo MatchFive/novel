@@ -16,9 +16,9 @@ from app.services.prompts.short_story import (
 
 
 class ShortStoryService:
-    def __init__(self, db: AsyncSession, llm: Optional[LLMClient] = None):
+    def __init__(self, db: AsyncSession, llm: LLMClient):
         self.db = db
-        self.llm = llm or LLMClient()
+        self.llm = llm
 
     async def _get_or_create(self, project_id: str) -> ShortSetting:
         s = await self.db.get(ShortSetting, project_id)

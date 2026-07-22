@@ -23,8 +23,8 @@ class NotFoundError(AppError):
 
 
 class ValidationError(AppError):
-    def __init__(self, message: str = "参数校验失败"):
-        super().__init__(message, "VALIDATION_ERROR", 422)
+    def __init__(self, message: str = "参数校验失败", status_code: int = 422, code: str = "VALIDATION_ERROR"):
+        super().__init__(message, code, status_code)
 
 
 class ConflictError(AppError):

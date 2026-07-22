@@ -90,6 +90,14 @@ async def read_chapters(db: AsyncSession, project_id: str) -> list[dict]:
     return await repo.list_chapters(db, project_id)
 
 
+async def read_chapter(db: AsyncSession, chapter_id: str) -> dict | None:
+    return await repo.get_chapter(db, chapter_id)
+
+
+async def read_plot_node(db: AsyncSession, plot_node_id: str) -> dict | None:
+    return await repo.get_plot(db, plot_node_id)
+
+
 # 注册
 register_tool(
     "read_outlines",
@@ -160,6 +168,18 @@ register_tool(
     "读取项目全部章节。参数：project_id",
     {"type": "object", "properties": {"project_id": {"type": "string"}}, "required": ["project_id"]},
     read_chapters,
+)
+register_tool(
+    "read_chapter",
+    "读取单个章节详情。参数：chapter_id",
+    {"type": "object", "properties": {"chapter_id": {"type": "string"}}, "required": ["chapter_id"]},
+    read_chapter,
+)
+register_tool(
+    "read_plot_node",
+    "读取单个剧情节点详情。参数：plot_node_id",
+    {"type": "object", "properties": {"plot_node_id": {"type": "string"}}, "required": ["plot_node_id"]},
+    read_plot_node,
 )
 
 

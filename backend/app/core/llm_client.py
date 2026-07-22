@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator, Optional
 
 import httpx
 
 from app.config import settings
+from app.core.errors import AppError
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -30,6 +34,30 @@ class LLMClient:
             "Content-Type": "application/json",
         }
 
+    def _ensure_api_key(self) -> None:
+        if not self.api_key or not str(self.api_key).strip():
+            raise AppError(
+                "LLM API key 未配置，请在项目根目录 .env 文件中设置 LLM_API_KEY",
+                code="LLM_NOT_CONFIGURED",
+                status_code=503,
+            )
+
+    def _raise_llm_error(self, payload: dict, exc: httpx.HTTPStatusError) -> None:
+        """把上游 LLM HTTP 错误转换为结构化 AppError，并记录请求体便于排查。"""
+        try:
+            body = exc.response.text
+        except Exception:
+            body = "<无法读取响应体>"
+        logger.error(
+            "LLM request failed: %s %s - payload=%s response=%s",
+            exc.response.status_code, exc.request.url, json.dumps(payload, ensure_ascii=False), body,
+        )
+        raise AppError(
+            f"调用模型服务失败（{exc.response.status_code}）：{body[:200]}",
+            code="LLM_REQUEST_FAILED",
+            status_code=502,
+        ) from exc
+
     async def chat(
         self,
         messages: list[dict[str, str]],
@@ -39,6 +67,7 @@ class LLMClient:
         response_format: Optional[dict] = None,
         timeout: Optional[float] = None,
     ) -> str:
+        self._ensure_api_key()
         payload: dict[str, Any] = {
             "model": model or self.model,
             "messages": messages,
@@ -47,12 +76,15 @@ class LLMClient:
         if response_format:
             payload["response_format"] = response_format
         async with httpx.AsyncClient(timeout=timeout or self.timeout) as client:
-            resp = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=self._headers(),
-                json=payload,
-            )
-            resp.raise_for_status()
+            try:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=self._headers(),
+                    json=payload,
+                )
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                self._raise_llm_error(payload, exc)
             data = resp.json()
             return data["choices"][0]["message"]["content"]
 
@@ -63,6 +95,7 @@ class LLMClient:
         model: Optional[str] = None,
         temperature: Optional[float] = None,
     ) -> AsyncIterator[str]:
+        self._ensure_api_key()
         payload: dict[str, Any] = {
             "model": model or self.model,
             "messages": messages,
@@ -70,24 +103,27 @@ class LLMClient:
             "stream": True,
         }
         async with httpx.AsyncClient(timeout=self.timeout + 60) as client:
-            async with client.stream(
-                "POST", f"{self.base_url}/chat/completions",
-                headers=self._headers(), json=payload,
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[len("data:"):].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(data)
-                        delta = chunk["choices"][0]["delta"].get("content")
-                        if delta:
-                            yield delta
-                    except (json.JSONDecodeError, KeyError, IndexError):
-                        continue
+            try:
+                async with client.stream(
+                    "POST", f"{self.base_url}/chat/completions",
+                    headers=self._headers(), json=payload,
+                ) as resp:
+                    resp.raise_for_status()
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[len("data:"):].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                            delta = chunk["choices"][0]["delta"].get("content")
+                            if delta:
+                                yield delta
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+            except httpx.HTTPStatusError as exc:
+                self._raise_llm_error(payload, exc)
 
     async def parse_llm_json(self, messages: list[dict[str, str]], *, model: Optional[str] = None) -> Any:
         """调用 chat（json 模式）并解析为 Python 对象；失败返回原始文本。"""
@@ -97,6 +133,35 @@ class LLMClient:
             response_format={"type": "json_object"},
         )
         return _extract_json(raw)
+
+    async def embed(
+        self,
+        texts: list[str],
+        *,
+        model: Optional[str] = None,
+        dimensions: Optional[int] = None,
+    ) -> list[list[float]]:
+        """调用 OpenAI 兼容 /embeddings 接口，返回与输入顺序对应的向量列表。"""
+        self._ensure_api_key()
+        payload: dict[str, Any] = {
+            "model": model or self.model,
+            "input": texts,
+        }
+        if dimensions is not None and dimensions > 0:
+            payload["dimensions"] = dimensions
+        async with httpx.AsyncClient(timeout=self.timeout + 60) as client:
+            try:
+                resp = await client.post(
+                    f"{self.base_url}/embeddings",
+                    headers=self._headers(),
+                    json=payload,
+                )
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                self._raise_llm_error(payload, exc)
+            data = resp.json().get("data", [])
+            data.sort(key=lambda x: x.get("index", 0))
+            return [item["embedding"] for item in data]
 
 
 def _extract_json(text: str) -> Any:

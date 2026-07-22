@@ -49,12 +49,39 @@ async def update_user_settings(payload: UserSettingUpdate, db: AsyncSession = De
         s.hotspot_sources = payload.hotspot_sources
     if payload.theme is not None:
         s.theme = payload.theme
+    if payload.assistant_summary_threshold is not None:
+        s.assistant_summary_threshold = max(1, payload.assistant_summary_threshold)
+    if payload.assistant_max_summaries is not None:
+        s.assistant_max_summaries = max(0, payload.assistant_max_summaries)
+    if payload.assistant_summary_max_length is not None:
+        s.assistant_summary_max_length = max(100, payload.assistant_summary_max_length)
+    if payload.assistant_history_recent_messages is not None:
+        s.assistant_history_recent_messages = max(1, payload.assistant_history_recent_messages)
+    if payload.assistant_history_top_k is not None:
+        s.assistant_history_top_k = max(0, payload.assistant_history_top_k)
+    if payload.content_rating is not None:
+        if payload.content_rating not in ("loose", "standard", "strict"):
+            raise ValidationError("无效的尺度等级（可选：loose/standard/strict）")
+        s.content_rating = payload.content_rating
+    if payload.chapter_target_words is not None:
+        s.chapter_target_words = min(8000, max(1000, payload.chapter_target_words))
     await db.commit()
     await db.refresh(s)
     return s.to_dict()
 
 
 # ---------- 模型配置 ----------
+async def _ensure_level_unique(db: AsyncSession, level: str | None, exclude_id: str | None = None):
+    """保证同一 level 最多只有一条配置；把其他同 level 配置的 level 置为 None。"""
+    if not level:
+        return
+    res = await db.execute(select(ModelConfig).where(ModelConfig.level == level))  # noqa: E712
+    for m in res.scalars().all():
+        if exclude_id and m.id == exclude_id:
+            continue
+        m.level = None
+
+
 @router.get("/models")
 async def list_models(db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(ModelConfig))
@@ -67,7 +94,11 @@ async def create_model(payload: ModelConfigCreate, db: AsyncSession = Depends(ge
         res = await db.execute(select(ModelConfig).where(ModelConfig.is_default == True))  # noqa: E712
         for m in res.scalars().all():
             m.is_default = False
-    m = ModelConfig(**payload.model_dump())
+    await _ensure_level_unique(db, payload.level)
+    data = payload.model_dump()
+    if data.get("embedding_dimension") is None:
+        data["embedding_dimension"] = 1536
+    m = ModelConfig(**data)
     db.add(m)
     await db.commit()
     await db.refresh(m)
@@ -85,6 +116,9 @@ async def update_model(model_id: str, payload: ModelConfigUpdate, db: AsyncSessi
         for other in res.scalars().all():
             if other.id != model_id:
                 other.is_default = False
+    if data.get("embedding_dimension") is None and "embedding_dimension" in data:
+        data["embedding_dimension"] = 1536
+    await _ensure_level_unique(db, data.get("level"), exclude_id=model_id)
     for k, v in data.items():
         setattr(m, k, v)
     await db.commit()

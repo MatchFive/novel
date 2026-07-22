@@ -36,6 +36,26 @@ async def _gather_short(db: AsyncSession, project_id: str) -> dict:
     return {"setting": short_setting, "chapters": chapters}
 
 
+def _build_outline_tree(outlines: list[dict]) -> list[dict]:
+    by_id = {o["id"]: o for o in outlines}
+    roots = []
+    for o in outlines:
+        pid = o.get("parent_id")
+        if not pid or pid not in by_id:
+            roots.append(o)
+    return roots
+
+
+def _render_outline_node(outlines: list[dict], node: dict, depth: int = 0) -> str:
+    indent = "  " * depth
+    header = {"broad": "#", "period": "##", "volume": "###"}.get(node.get("type"), "#")
+    title = node.get("title") or "（无标题）"
+    lines = [f"{indent}{header} {title}", f"{indent}{node.get('content', '')}", ""]
+    for child in (c for c in outlines if c.get("parent_id") == node.get("id")):
+        lines.append(_render_outline_node(outlines, child, depth + 1))
+    return "\n".join(lines)
+
+
 def render_markdown_long(title: str, data: dict) -> str:
     out = [f"# {title}", ""]
     out.append("## 角色")
@@ -44,6 +64,10 @@ def render_markdown_long(title: str, data: dict) -> str:
     out.append("\n## 世界观")
     for w in data["world"]:
         out.append(f"### {w.get('category')}\n{w.get('content')}")
+    out.append("\n## 大纲")
+    tree = _build_outline_tree(data["outlines"])
+    for node in tree:
+        out.append(_render_outline_node(data["outlines"], node))
     out.append("\n## 伏笔")
     for f in data["foreshadows"]:
         out.append(f"- [{f.get('state')}] {f.get('title')}：{f.get('content')}")

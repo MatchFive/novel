@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import logging
 import os
 import sys
 import threading
 import time
 import webbrowser
+from pathlib import Path
 
 import uvicorn
 
@@ -17,6 +19,7 @@ except ImportError:  # pragma: no cover
     webview = None
 
 from app.config import settings
+from app.logging_config import setup_logging
 
 BACKEND_HOST = "127.0.0.1"
 BACKEND_PORT = 8765
@@ -53,16 +56,22 @@ def _wait_for_server(timeout: float = 30.0) -> bool:
 
 
 def main() -> None:
+    setup_logging(settings.log_level, Path(settings.log_dir))
+    launcher_logger = logging.getLogger("launcher")
+    launcher_logger.info("启动器启动，数据目录: %s", settings.log_dir)
+
     t = threading.Thread(target=_run_server, daemon=True)
     t.start()
 
     if not _wait_for_server():
-        print("后端启动失败，回退到系统浏览器。")
+        launcher_logger.error("后端启动失败，回退到系统浏览器。")
         webbrowser.open(APP_URL)
         return
 
+    launcher_logger.info("后端已就绪，打开窗口。")
+
     if webview is None:
-        print("pywebview 不可用，回退到系统浏览器。")
+        launcher_logger.warning("pywebview 不可用，回退到系统浏览器。")
         webbrowser.open(APP_URL)
         return
 
@@ -76,10 +85,12 @@ def main() -> None:
         )
         webview.start(gui="edgechromium")
     except Exception:
+        launcher_logger.exception("Edge 窗口启动失败，尝试 CEF / 浏览器回退。")
         # Edge 不可用，回退 CEF / 系统浏览器
         try:
             webview.start(gui="cef")
         except Exception:
+            launcher_logger.exception("CEF 亦不可用，回退到系统浏览器。")
             webbrowser.open(APP_URL)
 
 

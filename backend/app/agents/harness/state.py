@@ -14,7 +14,9 @@ class ChangeRecord(BaseModel):
     entity_id: Optional[str] = None
     before: Optional[dict] = None
     after: Optional[dict] = None
+    temp_id: Optional[str] = None
     requires_confirmation: bool = True
+    stage: str = ""
 
 
 class HarnessState(BaseModel):
@@ -38,6 +40,8 @@ def make_change(
     after: dict,
     entity_id: Optional[str] = None,
     before: Optional[dict] = None,
+    stage: Optional[str] = None,
+    temp_id: Optional[str] = None,
 ) -> ChangeRecord:
     import uuid
     return ChangeRecord(
@@ -48,4 +52,6 @@ def make_change(
         entity_id=entity_id,
         before=before,
         after=after,
+        stage=stage or "",
+        temp_id=temp_id,
     )

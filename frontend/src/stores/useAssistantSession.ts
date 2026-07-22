@@ -1,29 +1,52 @@
 import { create } from "zustand";
 import { assistantApi } from "@/api/short";
-import type { AssistantMessage, ChangeRecord } from "@/types";
+import type { AssistantMessage, AssistantSession, AutoAppliedItem, ChangeRecord } from "@/types";
 
 interface AssistantSessionState {
   sessionId: string | null;
+  sessions: AssistantSession[];
   messages: AssistantMessage[];
   busy: boolean;
   pendingRecords: ChangeRecord[];
   error: string | null;
-  loadHistory: (pid: string) => Promise<void>;
-  sendMessage: (pid: string, text: string) => Promise<void>;
+  assistantOpen: boolean;
+  chaptersVersion: number;
+  entitiesVersion: number;
+  reset: () => void;
+  loadHistory: (pid: string | null) => Promise<void>;
+  loadSessions: (pid: string | null) => Promise<void>;
+  sendMessage: (pid: string | null, text: string, context?: Record<string, any>) => Promise<void>;
+  createSession: (pid: string) => Promise<void>;
+  switchSession: (sessionId: string, pid: string) => Promise<void>;
   stageChange: (record: ChangeRecord) => Promise<void>;
-  confirm: () => Promise<void>;
-  reject: () => Promise<void>;
+  confirm: (changeIds?: string[]) => Promise<void>;
+  reject: (changeIds?: string[]) => Promise<void>;
+  undoAuto: (projectId: string, entityType: string, entityId: string) => Promise<void>;
+  setAssistantOpen: (open: boolean) => void;
+  openAssistant: () => void;
 }
 
 export const useAssistantSession = create<AssistantSessionState>((set, get) => ({
   sessionId: null,
+  sessions: [],
   messages: [],
   busy: false,
   pendingRecords: [],
   error: null,
+  assistantOpen: false,
+  chaptersVersion: 0,
+  entitiesVersion: 0,
 
-  loadHistory: async (pid: string) => {
+  reset: () => {
+    set({ sessionId: null, sessions: [], messages: [], pendingRecords: [], error: null, assistantOpen: false });
+  },
+
+  loadHistory: async (pid: string | null) => {
     set({ error: null, messages: [], pendingRecords: [] });
+    if (!pid) {
+      set({ sessionId: null });
+      return;
+    }
     try {
       const { data } = await assistantApi.history(pid);
       set({
@@ -36,8 +59,48 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
     }
   },
 
-  sendMessage: async (pid: string, text: string) => {
+  loadSessions: async (pid: string | null) => {
+    if (!pid) {
+      set({ sessions: [] });
+      return;
+    }
+    try {
+      const { data } = await assistantApi.sessions(pid);
+      set({ sessions: data.sessions || [] });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "加载会话列表失败" });
+    }
+  },
+
+  createSession: async (pid: string) => {
     set({ busy: true, error: null });
+    try {
+      const { data } = await assistantApi.createSession(pid);
+      await get().loadSessions(pid);
+      await get().loadHistory(pid);
+      set({ sessionId: data.session.id });
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "新建对话失败" });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  switchSession: async (sessionId: string, pid: string) => {
+    set({ busy: true, error: null });
+    try {
+      await assistantApi.switchSession(sessionId);
+      await get().loadSessions(pid);
+      await get().loadHistory(pid);
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "切换对话失败" });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  sendMessage: async (pid: string | null, text: string, context?: Record<string, any>) => {
+    set({ busy: true, error: null, assistantOpen: true });
     const userMsg: AssistantMessage = {
       id: `local-${Date.now()}`,
       role: "user",
@@ -46,7 +109,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
     };
     set((s) => ({ messages: [...s.messages, userMsg] }));
     try {
-      const { data } = await assistantApi.chat(pid, text);
+      const { data } = await assistantApi.chat(pid, text, context);
       const assistantMsg: AssistantMessage = {
         id: data.message_id || `local-assistant-${Date.now()}`,
         role: "assistant",
@@ -54,6 +117,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
         metadata: {
           intent: data.intent,
           change_record_ids: (data.change_records || []).map((r: ChangeRecord) => r.id),
+          auto_applied: data.auto_applied || [],
         },
         created_at: new Date().toISOString(),
       };
@@ -61,6 +125,7 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
         sessionId: data.session_id,
         messages: [...s.messages, assistantMsg],
         pendingRecords: [...s.pendingRecords, ...(data.change_records || [])],
+        chaptersVersion: (data.auto_applied?.length ? s.chaptersVersion + 1 : s.chaptersVersion),
       }));
     } catch (err) {
       const errorText = err instanceof Error ? err.message : "发送失败";
@@ -98,12 +163,12 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
     }
   },
 
-  confirm: async () => {
+  confirm: async (changeIds?: string[]) => {
     const sessionId = get().sessionId;
     if (!sessionId) return;
     set({ busy: true, error: null });
     try {
-      const { data } = await assistantApi.confirm(sessionId);
+      const { data } = await assistantApi.confirm(sessionId, changeIds);
       const messages = [...get().messages];
       let lastAssistant = -1;
       for (let i = messages.length - 1; i >= 0; i--) {
@@ -127,7 +192,13 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
             },
           };
         }
-        set({ error: errorText, messages, pendingRecords: [] });
+        // 仅移除已成功应用的记录，未成功的保留在待确认列表
+        const appliedIds = new Set((data.applied || []).map((a: any) => a.change_id || a.entity_id));
+        set({
+          error: errorText,
+          messages,
+          pendingRecords: get().pendingRecords.filter((r) => !appliedIds.has(r.id)),
+        });
         return;
       }
       if (lastAssistant >= 0) {
@@ -140,7 +211,29 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
           },
         };
       }
-      set({ messages, pendingRecords: [] });
+      const applied = data.applied || [];
+      const merged = applied.filter((a: any) => a.merged_into).length;
+      const skipped = applied.filter((a: any) => a.skipped_duplicate).length;
+      if (merged > 0 || skipped > 0) {
+        const parts: string[] = [];
+        if (merged > 0) parts.push(`${merged} 条与现有条目同名，已合并更新`);
+        if (skipped > 0) parts.push(`${skipped} 条重复内容已跳过`);
+        messages.push({
+          id: `local-dedup-${Date.now()}`,
+          role: "assistant",
+          content: `去重处理：${parts.join("；")}。`,
+          created_at: new Date().toISOString(),
+        });
+      }
+      // 如果是指定确认，移除对应记录；如果是全部确认，后端已清空
+      const confirmedIds = changeIds
+        ? new Set(changeIds)
+        : new Set(get().pendingRecords.map((r) => r.id));
+      set({
+        messages,
+        pendingRecords: get().pendingRecords.filter((r) => !confirmedIds.has(r.id)),
+        entitiesVersion: get().entitiesVersion + 1,
+      });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "应用失败" });
     } finally {
@@ -148,12 +241,12 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
     }
   },
 
-  reject: async () => {
+  reject: async (changeIds?: string[]) => {
     const sessionId = get().sessionId;
     if (!sessionId) return;
     set({ busy: true, error: null });
     try {
-      const { data } = await assistantApi.reject(sessionId);
+      const { data } = await assistantApi.reject(sessionId, changeIds);
       set((s) => {
         const messages = [...s.messages];
         let lastAssistant = -1;
@@ -173,7 +266,11 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
             },
           };
         }
-        return { messages, pendingRecords: [] };
+        const rejectedIds = changeIds ? new Set(changeIds) : new Set(s.pendingRecords.map((r) => r.id));
+        return {
+          messages,
+          pendingRecords: s.pendingRecords.filter((r) => !rejectedIds.has(r.id)),
+        };
       });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : "拒绝失败" });
@@ -181,4 +278,23 @@ export const useAssistantSession = create<AssistantSessionState>((set, get) => (
       set({ busy: false });
     }
   },
+
+  undoAuto: async (projectId: string, entityType: string, entityId: string) => {
+    set({ busy: true, error: null });
+    try {
+      const { data } = await assistantApi.undo(projectId, entityType, entityId);
+      if (!data.ok) {
+        set({ error: data.message || "没有可撤销的自动生成" });
+        return;
+      }
+      set((s) => ({ chaptersVersion: s.chaptersVersion + 1 }));
+    } catch (err) {
+      set({ error: err instanceof Error ? err.message : "撤销失败" });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  setAssistantOpen: (open: boolean) => set({ assistantOpen: open }),
+  openAssistant: () => set({ assistantOpen: true }),
 }));

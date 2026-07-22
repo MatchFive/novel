@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 from app.main import app
 from app.database import create_all, engine, AsyncSessionLocal
 from app.models import AssistantMessage
+from app.config import settings
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +21,7 @@ async def cleanup_tables():
             "long_world_settings",
             "long_plot_nodes",
             "long_chapters",
+            "model_configs",
             "projects",
         ):
             await conn.exec_driver_sql(f"DELETE FROM {table};")
@@ -38,7 +40,7 @@ async def setup_db():
 
 
 @pytest.mark.anyio
-@patch("app.api.assistant.LLMClient")
+@patch("app.core.llm_factory.LLMClient")
 async def test_chat_persists_messages(mock_llm_client):
     mock_llm = mock_llm_client.return_value
     mock_llm.parse_llm_json = AsyncMock(return_value={"intent": "test", "tasks": []})
@@ -62,6 +64,59 @@ async def test_chat_persists_messages(mock_llm_client):
         msgs = r.json()["messages"]
         assert any(m["role"] == "user" for m in msgs)
         assert any(m["role"] == "assistant" for m in msgs)
+
+
+@pytest.mark.anyio
+@patch("app.api.assistant.run_supervisor")
+@patch("app.core.llm_factory.LLMClient")
+async def test_chat_does_not_duplicate_user_input(mock_llm_client, mock_supervisor):
+    """当前用户消息不应在 supervisor 的 prompt 中出现两次。"""
+    mock_supervisor.return_value = {"intent": "test", "tasks": []}
+    mock_llm = mock_llm_client.return_value
+    mock_llm.chat = AsyncMock(return_value="summary")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "dup", "description": ""})
+        assert r.status_code == 200
+        pid = r.json()["id"]
+
+        r = await ac.post("/api/assistant/chat", json={"project_id": pid, "message": "hello"})
+        assert r.status_code == 200
+
+        mock_supervisor.assert_called_once()
+        _, messages = mock_supervisor.call_args.args
+        user_contents = [m["content"] for m in messages if m["role"] == "user"]
+        assert user_contents.count("hello") == 1
+
+
+@pytest.mark.anyio
+@patch("app.core.llm_factory.LLMClient")
+async def test_chat_persists_message_count_without_compression(mock_llm_client):
+    """未触发压缩时，message_count 也应在每次 chat 后持久递增。"""
+    mock_llm = mock_llm_client.return_value
+    mock_llm.parse_llm_json = AsyncMock(return_value={"intent": "test", "tasks": []})
+    mock_llm.chat = AsyncMock(return_value="summary")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "count", "description": ""})
+        assert r.status_code == 200
+        pid = r.json()["id"]
+
+        r = await ac.post("/api/assistant/chat", json={"project_id": pid, "message": "first"})
+        assert r.status_code == 200
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        assert r.status_code == 200
+        assert r.json()["message_count"] == 2
+
+        r = await ac.post("/api/assistant/chat", json={"project_id": pid, "message": "second"})
+        assert r.status_code == 200
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        assert r.status_code == 200
+        assert r.json()["message_count"] == 4
 
 
 @pytest.mark.anyio
@@ -174,6 +229,27 @@ async def test_reject_updates_message_metadata():
 
 
 @pytest.mark.anyio
+async def test_chat_returns_llm_config_error_when_key_missing():
+    original_key = settings.llm_api_key
+    settings.llm_api_key = ""
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            r = await ac.post("/api/projects", json={"type": "long", "title": "missing-key", "description": ""})
+            assert r.status_code == 200
+            pid = r.json()["id"]
+
+            r = await ac.post("/api/assistant/chat", json={"project_id": pid, "message": "hello"})
+            assert r.status_code == 503
+            body = r.json()
+            assert body["ok"] is False
+            assert body["code"] == "LLM_NOT_CONFIGURED"
+            assert "LLM_API_KEY" in body["message"]
+    finally:
+        settings.llm_api_key = original_key
+
+
+@pytest.mark.anyio
 async def test_confirm_partial_status():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -225,4 +301,108 @@ async def test_confirm_partial_status():
         assert latest["metadata"].get("status") == "partial"
         assert latest["metadata"].get("applied_count") == 1
         assert latest["metadata"].get("error_count") == 1
+
+
+@pytest.mark.anyio
+async def test_default_model_config_used_by_llm_factory():
+    from app.core.llm_factory import get_default_llm_client
+    from app.models import ModelConfig
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncSessionLocal() as db:
+            cfg = ModelConfig(
+                name="deepseek",
+                base_url="https://api.deepseek.com/v1",
+                api_key="sk-test-key",
+                model="deepseek-v4-flash",
+                is_default=True,
+            )
+            db.add(cfg)
+            await db.commit()
+
+            client = await get_default_llm_client(db)
+            assert client.base_url == "https://api.deepseek.com/v1"
+            assert client.api_key == "sk-test-key"
+            assert client.model == "deepseek-v4-flash"
+
+
+@pytest.mark.anyio
+async def test_create_session_deactivates_previous_and_increments_title():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "sessions", "description": ""})
+        assert r.status_code == 200
+        pid = r.json()["id"]
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        assert r.status_code == 200
+        first = r.json()
+        assert first["title"] == "对话 1"
+        assert first["is_active"] is True
+
+        r = await ac.post(f"/api/assistant/session/{pid}")
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        second = r.json()["session"]
+        assert second["title"] == "对话 2"
+        assert second["is_active"] is True
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        assert r.json()["id"] == second["id"]
+        assert r.json()["is_active"] is True
+
+        r = await ac.get(f"/api/assistant/sessions/{pid}")
+        assert r.status_code == 200
+        sessions = r.json()["sessions"]
+        assert len(sessions) == 2
+        by_id = {s["id"]: s for s in sessions}
+        assert by_id[first["id"]]["is_active"] is False
+        assert by_id[second["id"]]["is_active"] is True
+
+
+@pytest.mark.anyio
+async def test_list_sessions_ordered_by_updated_at_desc():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "order", "description": ""})
+        pid = r.json()["id"]
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        first_id = r.json()["id"]
+
+        r = await ac.post(f"/api/assistant/session/{pid}")
+        second_id = r.json()["session"]["id"]
+
+        # switch back to first to bump its updated_at
+        r = await ac.post(f"/api/assistant/session/{first_id}/switch")
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+
+        r = await ac.get(f"/api/assistant/sessions/{pid}")
+        sessions = r.json()["sessions"]
+        assert [s["id"] for s in sessions] == [first_id, second_id]
+
+
+@pytest.mark.anyio
+async def test_switch_session_changes_history():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post("/api/projects", json={"type": "long", "title": "switch", "description": ""})
+        pid = r.json()["id"]
+
+        r = await ac.get(f"/api/assistant/session/{pid}")
+        first_id = r.json()["id"]
+
+        r = await ac.post(f"/api/assistant/session/{pid}")
+        second_id = r.json()["session"]["id"]
+
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        assert r.json()["session_id"] == second_id
+
+        r = await ac.post(f"/api/assistant/session/{first_id}/switch")
+        assert r.json()["ok"] is True
+
+        r = await ac.get(f"/api/assistant/session/{pid}/history")
+        assert r.json()["session_id"] == first_id
 

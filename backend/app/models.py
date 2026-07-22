@@ -12,12 +12,13 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     JSON,
 )
 from sqlalchemy.dialects.sqlite import CHAR
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 
 from app.database import Base
 
@@ -59,6 +60,9 @@ class ModelConfig(Base):
     base_url = Column(String(512), nullable=False)
     api_key = Column(String(512), default="")
     model = Column(String(128), nullable=False)
+    level = Column(String(32), nullable=True, index=True)
+    embedding_model = Column(String(128), nullable=True)
+    embedding_dimension = Column(Integer, default=1536)
     is_default = Column(Boolean, default=False)
 
     def to_dict(self, hide_key: bool = True) -> dict:
@@ -67,6 +71,9 @@ class ModelConfig(Base):
             "name": self.name,
             "base_url": self.base_url,
             "model": self.model,
+            "level": self.level,
+            "embedding_model": self.embedding_model,
+            "embedding_dimension": self.embedding_dimension,
             "is_default": self.is_default,
             **({} if hide_key else {"api_key": self.api_key}),
         }
@@ -79,12 +86,26 @@ class UserSetting(Base):
     recursive_limit = Column(Integer, default=8)
     hotspot_sources = Column(JSON, default=list)
     theme = Column(String(32), default="light")
+    assistant_summary_threshold = Column(Integer, default=20)
+    assistant_max_summaries = Column(Integer, default=5)
+    assistant_summary_max_length = Column(Integer, default=1000)
+    assistant_history_recent_messages = Column(Integer, default=20)
+    assistant_history_top_k = Column(Integer, default=5)
+    content_rating = Column(String(16), default="standard")
+    chapter_target_words = Column(Integer, default=2500)
 
     def to_dict(self) -> dict:
         return {
             "recursive_limit": self.recursive_limit,
             "hotspot_sources": self.hotspot_sources or [],
             "theme": self.theme,
+            "assistant_summary_threshold": self.assistant_summary_threshold,
+            "assistant_max_summaries": self.assistant_max_summaries,
+            "assistant_summary_max_length": self.assistant_summary_max_length,
+            "assistant_history_recent_messages": self.assistant_history_recent_messages,
+            "assistant_history_top_k": self.assistant_history_top_k,
+            "content_rating": self.content_rating or "standard",
+            "chapter_target_words": self.chapter_target_words or 2500,
         }
 
 
@@ -93,14 +114,23 @@ class AssistantSession(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=True, index=True)
+    title = Column(String(255), nullable=False, default="未命名对话")
+    is_active = Column(Boolean, default=False, nullable=False)
     staged_changes = Column(JSON, default=list)
+    context = Column(JSON, default=dict)
+    summaries = Column(JSON, default=list)
+    message_count = Column(Integer, default=0, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "project_id": self.project_id,
+            "title": self.title,
+            "is_active": self.is_active,
             "staged_changes": self.staged_changes or [],
+            "summaries": self.summaries or [],
+            "message_count": self.message_count,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 
@@ -116,6 +146,21 @@ class AssistantMessage(Base):
     created_at = Column(DateTime, default=_now, nullable=False)
 
 
+class AssistantSummaryEmbedding(Base):
+    """助手历史摘要的 embedding，用于按当前输入检索相关摘要。"""
+
+    __tablename__ = "assistant_summary_embeddings"
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    session_id = Column(CHAR(36), ForeignKey("assistant_sessions.id"), nullable=False, index=True)
+    turn_range = Column(String(32), nullable=False)
+    summary_text = Column(Text, nullable=False)
+    embedding = Column(LargeBinary, nullable=False)
+    model = Column(String(128), nullable=False)
+    dimension = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+
 # ---------------- 长篇小说数据（全部 project_id 外键） ----------------
 
 class LongOutline(Base):
@@ -123,11 +168,16 @@ class LongOutline(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
-    parent_id = Column(CHAR(36), nullable=True, index=True)
+    parent_id = Column(CHAR(36), ForeignKey("long_outlines.id"), nullable=True, index=True)
     title = Column(String(255), default="")
     content = Column(Text, default="")
     version_chain = Column(CHAR(36), nullable=True)  # 上一版 id
     order = Column(Integer, default=0)
+    type = Column(String(32), default="broad")
+    chapter_start = Column(Integer, nullable=True)
+    chapter_end = Column(Integer, nullable=True)
+
+    children = relationship("LongOutline", backref=backref("parent", remote_side=[id]))
 
 
 class LongCharacter(Base):
@@ -168,9 +218,11 @@ class LongPlotNode(Base):
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
     project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
+    chapter_id = Column(CHAR(36), ForeignKey("long_chapters.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String(255), default="")
     summary = Column(Text, default="")
     timeline_pos = Column(String(64), default="")
+    order = Column(Integer, default=0)
 
 
 class LongChapter(Base):
@@ -180,6 +232,8 @@ class LongChapter(Base):
     project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
     title = Column(String(255), default="")
     content = Column(Text, default="")
+    detailed_outline = Column(Text, default="")
+    status = Column(String(32), default="draft")
     order = Column(Integer, default=0)
     constraints = Column(JSON, default=list)
 
@@ -237,6 +291,7 @@ class LongChangeRecord(Base):
     before = Column(JSON, default=None)
     after = Column(JSON, default=None)
     status = Column(Enum("staged", "applied", "rejected", name="cr_status"), default="staged")
+    source = Column(String(16), default="staged")
     created_at = Column(DateTime, default=_now)
 
 
