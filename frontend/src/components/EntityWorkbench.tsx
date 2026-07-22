@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useConfirm } from "@/hooks/useConfirm";
 import { useAssistantSession } from "@/stores/useAssistantSession";
+import { CharacterMemoryPanel } from "@/components/character/CharacterMemoryPanel";
 import { Button, Input, Textarea, SectionTitle, Empty } from "@/components/ui";
 
 export interface FieldDef {
@@ -51,6 +52,7 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
   const [form, setForm] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"edit" | "memory">("edit");
   const { confirm, dialog } = useConfirm();
   const entitiesVersion = useAssistantSession((s) => s.entitiesVersion);
 
@@ -96,6 +98,11 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, creating, selected]);
+
+  // 切换选中或新建时重置到编辑标签
+  useEffect(() => {
+    setActiveTab("edit");
+  }, [selectedId, creating]);
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -240,52 +247,86 @@ export function EntityWorkbench({ pid, config, api, editorActions }: EntityWorkb
           ) : (
             <>
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-medium text-ink">
-                  {creating ? `新增${config.label}` : `编辑${config.label}`}
-                </span>
-                <div className="flex items-center gap-2">
-                  {!creating && selected && editorActions?.(selected, load)}
-                  <Button variant="primary" onClick={handleSave}>
-                    保存
-                  </Button>
-                  {!creating && (
-                    <Button variant="ghost" onClick={handleDelete}>
-                      删除
+                {config.kind === "character" && selected && !creating ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setActiveTab("edit")}
+                      className={`border px-2 py-1 text-xs ${
+                        activeTab === "edit"
+                          ? "border-accent bg-accent-soft text-accent-strong"
+                          : "border-line text-muted"
+                      }`}
+                    >
+                      编辑
+                    </button>
+                    <button
+                      onClick={() => setActiveTab("memory")}
+                      className={`border px-2 py-1 text-xs ${
+                        activeTab === "memory"
+                          ? "border-accent bg-accent-soft text-accent-strong"
+                          : "border-line text-muted"
+                      }`}
+                    >
+                      记忆
+                    </button>
+                  </div>
+                ) : (
+                  <span className="text-sm font-medium text-ink">
+                    {creating ? `新增${config.label}` : `编辑${config.label}`}
+                  </span>
+                )}
+                {activeTab === "edit" && (
+                  <div className="flex items-center gap-2">
+                    {!creating && selected && editorActions?.(selected, load)}
+                    <Button variant="primary" onClick={handleSave}>
+                      保存
                     </Button>
-                  )}
-                </div>
-              </div>
-              <div className="flex min-h-0 flex-1 flex-col gap-3">
-                {config.fields.map((f) => (
-                  <div key={f.key} className={f.fill ? "flex min-h-0 flex-1 flex-col" : undefined}>
-                    <label className="mb-1 block text-xs text-muted">{f.label}</label>
-                    {f.options ? (
-                      <select
-                        className={selectClass}
-                        value={form[f.key] || ""}
-                        onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
-                      >
-                        <option value="">（未设置）</option>
-                        {f.options.map((o) => (
-                          <option key={o} value={o}>{o}</option>
-                        ))}
-                      </select>
-                    ) : f.multiline ? (
-                      <Textarea
-                        rows={f.fill ? undefined : (f.rows ?? 4)}
-                        className={f.fill ? "min-h-[12rem] flex-1 resize-none leading-relaxed" : "leading-relaxed"}
-                        value={form[f.key] || ""}
-                        onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
-                      />
-                    ) : (
-                      <Input
-                        value={form[f.key] || ""}
-                        onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
-                      />
+                    {!creating && (
+                      <Button variant="ghost" onClick={handleDelete}>
+                        删除
+                      </Button>
                     )}
                   </div>
-                ))}
+                )}
               </div>
+              {activeTab === "edit" && (
+                <div className="flex min-h-0 flex-1 flex-col gap-3">
+                  {config.fields.map((f) => (
+                    <div key={f.key} className={f.fill ? "flex min-h-0 flex-1 flex-col" : undefined}>
+                      <label className="mb-1 block text-xs text-muted">{f.label}</label>
+                      {f.options ? (
+                        <select
+                          className={selectClass}
+                          value={form[f.key] || ""}
+                          onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                        >
+                          <option value="">（未设置）</option>
+                          {f.options.map((o) => (
+                            <option key={o} value={o}>{o}</option>
+                          ))}
+                        </select>
+                      ) : f.multiline ? (
+                        <Textarea
+                          rows={f.fill ? undefined : (f.rows ?? 4)}
+                          className={f.fill ? "min-h-[12rem] flex-1 resize-none leading-relaxed" : "leading-relaxed"}
+                          value={form[f.key] || ""}
+                          onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                        />
+                      ) : (
+                        <Input
+                          value={form[f.key] || ""}
+                          onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {activeTab === "memory" && selected && (
+                <div className="flex-1 overflow-auto">
+                  <CharacterMemoryPanel characterId={selected.id} />
+                </div>
+              )}
             </>
           )}
         </div>
