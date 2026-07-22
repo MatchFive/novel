@@ -49,6 +49,31 @@ async def read_character(db: AsyncSession, character_id: str) -> dict | None:
     return await repo.get_character(db, character_id)
 
 
+async def read_character_memories(
+    db: AsyncSession,
+    character_id: str,
+    importance: str | None = None,
+    ttl: str | None = None,
+    related_foreshadow_id: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    memories = await repo.list_character_memories(db, character_id)
+    result = []
+    for m in memories:
+        if importance and m.get("importance") != importance:
+            continue
+        if ttl and m.get("ttl") != ttl:
+            continue
+        if related_foreshadow_id:
+            related = m.get("related_foreshadow_ids") or []
+            if related_foreshadow_id not in related:
+                continue
+        result.append(m)
+        if len(result) >= limit:
+            break
+    return result
+
+
 async def read_foreshadows(db: AsyncSession, project_id: str) -> list[dict]:
     return await repo.list_foreshadows(db, project_id)
 
@@ -95,6 +120,22 @@ register_tool(
     "读取单个角色详情。参数：character_id",
     {"type": "object", "properties": {"character_id": {"type": "string"}}, "required": ["character_id"]},
     read_character,
+)
+register_tool(
+    "read_character_memories",
+    "读取角色的已知信息记忆。支持按 importance、ttl、关联伏笔过滤。参数：character_id, importance(可选core|major|minor), ttl(可选permanent|long|arc|scene), related_foreshadow_id(可选), limit(默认20)",
+    {
+        "type": "object",
+        "properties": {
+            "character_id": {"type": "string"},
+            "importance": {"type": "string"},
+            "ttl": {"type": "string"},
+            "related_foreshadow_id": {"type": "string"},
+            "limit": {"type": "integer"},
+        },
+        "required": ["character_id"],
+    },
+    read_character_memories,
 )
 register_tool(
     "read_foreshadows",
