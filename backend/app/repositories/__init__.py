@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -57,6 +57,12 @@ async def _delete(db: AsyncSession, model, row_id: str) -> bool:
     return True
 
 
+async def _row_to_dict(row) -> dict | None:
+    if row is None:
+        return None
+    return {c.name: getattr(row, c.name) for c in row.__table__.columns}
+
+
 # ---- Outlines ----
 async def list_outlines(db, project_id): return await _list(db, LongOutline, project_id)
 async def get_outline(db, rid): return await _get(db, LongOutline, rid)
@@ -103,3 +109,88 @@ async def get_chapter(db, rid): return await _get(db, LongChapter, rid)
 async def create_chapter(db, data): return await _create(db, LongChapter, data)
 async def update_chapter(db, rid, data): return await _update(db, LongChapter, rid, data)
 async def delete_chapter(db, rid): return await _delete(db, LongChapter, rid)
+
+
+# ---- Character Memories ----
+async def list_character_memories(db: AsyncSession, character_id: str) -> list[dict]:
+    from app.models import LongCharacterMemory
+    res = await db.execute(select(LongCharacterMemory).where(LongCharacterMemory.character_id == character_id))
+    rows = res.scalars().all()
+    return [{c.name: getattr(r, c.name) for c in LongCharacterMemory.__table__.columns} for r in rows]
+
+
+async def get_character_memory(db: AsyncSession, memory_id: str) -> dict | None:
+    from app.models import LongCharacterMemory
+    row = await db.get(LongCharacterMemory, memory_id)
+    return await _row_to_dict(row)
+
+
+async def create_character_memory(db: AsyncSession, data: dict) -> dict:
+    from app.models import LongCharacterMemory
+    return await _create(db, LongCharacterMemory, data)
+
+
+async def update_character_memory(db: AsyncSession, memory_id: str, data: dict) -> dict | None:
+    from app.models import LongCharacterMemory
+    return await _update(db, LongCharacterMemory, memory_id, data)
+
+
+async def delete_character_memory(db: AsyncSession, memory_id: str) -> bool:
+    from app.models import LongCharacterMemory
+    return await _delete(db, LongCharacterMemory, memory_id)
+
+
+# ---- Character Memory Drafts ----
+async def list_character_memory_drafts(db: AsyncSession, chapter_id: str) -> list[dict]:
+    from app.models import LongCharacterMemoryDraft
+    res = await db.execute(
+        select(LongCharacterMemoryDraft)
+        .where(LongCharacterMemoryDraft.chapter_id == chapter_id)
+        .order_by(LongCharacterMemoryDraft.character_id, LongCharacterMemoryDraft.created_at)
+    )
+    rows = res.scalars().all()
+    return [{c.name: getattr(r, c.name) for c in LongCharacterMemoryDraft.__table__.columns} for r in rows]
+
+
+async def create_character_memory_draft(db: AsyncSession, data: dict) -> dict:
+    from app.models import LongCharacterMemoryDraft
+    return await _create(db, LongCharacterMemoryDraft, data)
+
+
+async def clear_character_memory_drafts(db: AsyncSession, chapter_id: str) -> None:
+    from app.models import LongCharacterMemoryDraft
+    await db.execute(delete(LongCharacterMemoryDraft).where(LongCharacterMemoryDraft.chapter_id == chapter_id))
+    await db.commit()
+
+
+# ---- Chapter Memory Extraction ----
+async def get_chapter_memory_extraction(db: AsyncSession, chapter_id: str) -> dict | None:
+    from app.models import LongChapterMemoryExtraction
+    row = await db.get(LongChapterMemoryExtraction, chapter_id)
+    if row is None:
+        return None
+    return {c.name: getattr(row, c.name) for c in LongChapterMemoryExtraction.__table__.columns}
+
+
+async def set_chapter_memory_extraction(
+    db: AsyncSession,
+    chapter_id: str,
+    content_hash: str,
+    memory_count: int,
+) -> None:
+    from app.models import LongChapterMemoryExtraction
+    from datetime import datetime, timezone
+    row = await db.get(LongChapterMemoryExtraction, chapter_id)
+    now = datetime.now(timezone.utc)
+    if row is None:
+        db.add(LongChapterMemoryExtraction(
+            chapter_id=chapter_id,
+            content_hash=content_hash,
+            memory_count=memory_count,
+            extracted_at=now,
+        ))
+    else:
+        row.content_hash = content_hash
+        row.memory_count = memory_count
+        row.extracted_at = now
+    await db.commit()
