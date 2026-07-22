@@ -1,5 +1,5 @@
 import api from "./client";
-import type { CreateOutlinePayload, UpdateOutlinePayload } from "@/types";
+import type { CreateOutlinePayload, UpdateOutlinePayload, CharacterMemory } from "@/types";
 
 export const longApi = {
   outlines: (pid: string) => api.get(`/long/outlines/${pid}`),
@@ -35,4 +35,21 @@ export const longApi = {
   addChapter: (data: any) => api.post("/long/chapters", data),
   updateChapter: (id: string, data: any) => api.put(`/long/chapters/${id}`, data),
   deleteChapter: (id: string) => api.delete(`/long/chapters/${id}`),
+
+  extractMemory: (chapterId: string) =>
+    api.post(`/long/chapters/${chapterId}/extract-memory`),
+  memoryDrafts: (chapterId: string) =>
+    api.get(`/long/chapters/${chapterId}/memory-drafts`),
+  applyMemoryDrafts: (chapterId: string) =>
+    api.post(`/long/memory-drafts/apply`, { chapter_id: chapterId }),
+  discardMemoryDrafts: (chapterId: string) =>
+    api.post(`/long/memory-drafts/discard`, { chapter_id: chapterId }),
+  characterMemories: (characterId: string) =>
+    api.get(`/long/characters/${characterId}/memories`),
+  addCharacterMemory: (characterId: string, data: Partial<CharacterMemory>) =>
+    api.post(`/long/characters/${characterId}/memories`, data),
+  updateCharacterMemory: (characterId: string, memoryId: string, data: Partial<CharacterMemory>) =>
+    api.put(`/long/characters/${characterId}/memories/${memoryId}`, data),
+  deleteCharacterMemory: (characterId: string, memoryId: string) =>
+    api.delete(`/long/characters/${characterId}/memories/${memoryId}`),
 };

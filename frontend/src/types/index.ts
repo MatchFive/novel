@@ -71,6 +71,36 @@ export interface Chapter {
   status?: string;
 }
 
+export interface CharacterMemory {
+  id: string;
+  project_id: string;
+  character_id: string;
+  content: string;
+  importance: "core" | "major" | "minor";
+  ttl: "permanent" | "long" | "arc" | "scene";
+  source_chapter_id: string | null;
+  source_type: "auto" | "manual";
+  related_character_ids: string[];
+  related_foreshadow_ids: string[];
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface CharacterMemoryDraft {
+  id: string;
+  project_id: string;
+  chapter_id: string;
+  character_id: string;
+  action: "add" | "update" | "delete";
+  target_memory_id: string | null;
+  content: string;
+  importance: "core" | "major" | "minor";
+  ttl: "permanent" | "long" | "arc" | "scene";
+  related_character_ids: string[];
+  related_foreshadow_ids: string[];
+  created_at: string | null;
+}
+
 export type OutlineType = "broad" | "period" | "volume";
 
 export interface OutlinePayloadBase {
