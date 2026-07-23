@@ -22,13 +22,11 @@ logger = logging.getLogger(__name__)
 
 def _register_routers(app: FastAPI) -> None:
     # 延迟导入，避免循环依赖；S1+ 逐步填充
-    from app.api import projects, settings as settings_api, short_story, hotspots
+    from app.api import projects, settings as settings_api
     from app.api import long_outline, long_character, long_foreshadow, long_world, long_plot, long_chapter
     from app.api import assistant, long_continue, long_memory, export, graph, log as log_api
     app.include_router(projects.router, prefix="/api/projects")
     app.include_router(settings_api.router, prefix="/api/settings")
-    app.include_router(short_story.router, prefix="/api/short")
-    app.include_router(hotspots.router, prefix="/api")
     app.include_router(long_outline.router, prefix="/api/long")
     app.include_router(long_character.router, prefix="/api/long")
     app.include_router(long_foreshadow.router, prefix="/api/long")
