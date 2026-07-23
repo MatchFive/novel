@@ -3,7 +3,6 @@ import AppShell from "./components/AppShell";
 import HomePage from "./pages/HomePage";
 import SettingsPage from "./pages/SettingsPage";
 import LongWorkspace from "./pages/LongWorkspace";
-import ShortStudio from "./pages/ShortStudio";
 import FloatingAssistant from "./components/FloatingAssistant";
 
 export default function App() {
@@ -13,7 +12,6 @@ export default function App() {
         <Route path="/" element={<HomePage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/project/long/:id" element={<LongWorkspace />} />
-        <Route path="/project/short/:id" element={<ShortStudio />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <FloatingAssistant />

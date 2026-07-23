@@ -1,6 +1,6 @@
 export interface Project {
   id: string;
-  type: "long" | "short";
+  type: "long";
   title: string;
   description: string;
   created_at: string | null;

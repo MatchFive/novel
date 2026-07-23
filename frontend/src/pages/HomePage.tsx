@@ -5,10 +5,7 @@ import { useConfirm } from "@/hooks/useConfirm";
 import type { Project } from "@/types";
 import { Button, Input, Textarea, Card } from "@/components/ui";
 
-type Tab = "long" | "short";
-
 export default function HomePage() {
-  const [tab, setTab] = useState<Tab>("long");
   const [projects, setProjects] = useState<Project[]>([]);
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
@@ -20,19 +17,19 @@ export default function HomePage() {
   const { confirm, dialog } = useConfirm();
 
   const load = async () => {
-    const { data } = await projectsApi.list(tab);
+    const { data } = await projectsApi.list("long");
     setProjects(data);
   };
 
-  useEffect(() => { load(); }, [tab]);
+  useEffect(() => { load(); }, []);
 
   const create = async () => {
     if (!title.trim()) return;
-    const { data } = await projectsApi.create(tab, title.trim(), description.trim());
+    const { data } = await projectsApi.create("long", title.trim(), description.trim());
     setCreating(false);
     setTitle("");
     setDescription("");
-    nav(`/project/${tab}/${data.id}`);
+    nav(`/project/long/${data.id}`);
   };
 
   const startEdit = (p: Project, e: React.MouseEvent) => {
@@ -62,31 +59,16 @@ export default function HomePage() {
       <div className="flex items-end justify-between">
         <div>
           <h1 className="font-serif text-3xl font-semibold tracking-wide text-ink">项目</h1>
-          <p className="mt-2 text-sm text-muted">短篇 / 长篇小说项目管理</p>
+          <p className="mt-2 text-sm text-muted">长篇小说项目管理</p>
         </div>
         <Button variant="primary" onClick={() => setCreating(true)} disabled={creating}>新建项目</Button>
-      </div>
-
-      <div className="mt-8 inline-flex rounded-full border border-line bg-surface p-1">
-        {(["long", "short"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={
-              "rounded-full px-5 py-1.5 text-sm font-medium transition-colors " +
-              (tab === t ? "bg-accent-soft text-accent-strong" : "text-muted hover:text-ink")
-            }
-          >
-            {t === "long" ? "长篇" : "短篇"}
-          </button>
-        ))}
       </div>
 
       {creating && (
         <Card className="mt-5 p-4">
           <div className="space-y-3">
             <Input
-              placeholder={tab === "long" ? "长篇标题" : "短篇标题"}
+              placeholder="长篇标题"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && create()}
@@ -115,7 +97,7 @@ export default function HomePage() {
             key={p.id}
             className={"relative p-6 text-left " + (editingId !== p.id ? "cursor-pointer " : "")}
             onClick={() => {
-              if (editingId !== p.id) nav(`/project/${p.type}/${p.id}`);
+              if (editingId !== p.id) nav(`/project/long/${p.id}`);
             }}
           >
             {editingId === p.id ? (

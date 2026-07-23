@@ -41,7 +41,7 @@ export default function FloatingAssistant() {
   } = useAssistantSession();
 
   useEffect(() => {
-    const match = location.pathname.match(/\/project\/(?:long|short)\/([^/]+)/);
+    const match = location.pathname.match(/\/project\/long\/([^/]+)/);
     const nextId = match?.[1] || null;
     const pid = nextId || "global";
     setProjectId(pid);
