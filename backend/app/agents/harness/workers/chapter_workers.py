@@ -458,6 +458,11 @@ class ChapterOutlineWorker(WorkerBase):
                     continue
                 if not fields.get("title"):
                     fields["title"] = chapter_for_prompt.get("title") or f"第 {chapter_num} 章"
+                else:
+                    # 强制章节名控制在 10 个字以内
+                    t = str(fields["title"])
+                    if len(t) > 10:
+                        fields["title"] = t[:10]
                 fields["order"] = chapter_order
                 fields["status"] = "reviewed"
                 if existing:

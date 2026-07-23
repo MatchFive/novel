@@ -164,6 +164,7 @@ ${_json_rules}
 业务规则：
 - 若【目标章节】已有 id，使用 action="update" 并填写其 id。
 - 若【目标章节】id 为空（新增章节），使用 action="add"，entity_id 为 null，并在 fields 中提供 title、order（与【目标章节】的 order 一致）、detailed_outline、status="reviewed"。
+- title 必须概括本章核心内容，控制在 10 个汉字以内，禁止直接使用“第 X 章”这类占位标题。
 - detailed_outline 应包含：场景列表、本章目标、冲突、情感弧线、结尾钩子。
 - 保持与总纲、剧情节点、角色、世界观一致。
 - 参考前文摘要和活跃伏笔。

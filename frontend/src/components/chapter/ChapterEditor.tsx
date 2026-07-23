@@ -100,7 +100,7 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
               const v = Number(e.target.value);
               if (!Number.isNaN(v) && v >= 1) setOrder(v);
             }}
-            className="w-14 text-center"
+            className="w-10 text-center"
           />
           <span className="text-sm text-muted">章</span>
         </div>
