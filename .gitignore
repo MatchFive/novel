@@ -9,3 +9,14 @@ frontend/tsconfig.tsbuildinfo
 /dist-exe/
 /build-exe/
 NovelStudio.spec
+
+# Claude / session artifacts
+.claude/
+.playwright-mcp/
+frontend/.superpowers/
+
+# Logs
+*.log
+
+# Session screenshots at repo root
+/*.png
