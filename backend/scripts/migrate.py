@@ -51,6 +51,13 @@ CREATE_TABLES = [
     "DROP TABLE IF EXISTS message_embeddings",
 ]
 
+CLEANUP_SQL = [
+    "DELETE FROM projects WHERE type = 'short'",
+    "DROP TABLE IF EXISTS short_settings",
+    "DROP TABLE IF EXISTS short_chapters",
+    "DROP TABLE IF EXISTS short_hotspots",
+]
+
 
 def migrate(db_path: Path = DB_PATH) -> None:
     if not db_path.exists():
@@ -73,6 +80,16 @@ def migrate(db_path: Path = DB_PATH) -> None:
     for sql in CREATE_TABLES:
         cur.execute(sql)
         print(f"Executed: {sql.strip()[:60]}...")
+
+    for sql in CLEANUP_SQL:
+        try:
+            cur.execute(sql)
+            print(f"Executed cleanup: {sql.strip()[:60]}...")
+        except sqlite3.OperationalError as exc:
+            if "no such table" in str(exc).lower():
+                print(f"Cleanup skipped (table already gone): {sql.strip()[:60]}...")
+            else:
+                raise
 
     conn.commit()
     conn.close()
