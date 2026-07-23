@@ -45,8 +45,6 @@ async def update_user_settings(payload: UserSettingUpdate, db: AsyncSession = De
         if payload.recursive_limit < 1:
             raise ValidationError("递归上限必须 >= 1")
         s.recursive_limit = min(payload.recursive_limit, app_settings.recursive_limit_hard_cap)
-    if payload.hotspot_sources is not None:
-        s.hotspot_sources = payload.hotspot_sources
     if payload.theme is not None:
         s.theme = payload.theme
     if payload.assistant_summary_threshold is not None:

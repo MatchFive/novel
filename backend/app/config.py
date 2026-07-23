@@ -65,9 +65,6 @@ class Settings(BaseSettings):
     neo4j_password: str = ""
     neo4j_enabled: bool = False
 
-    # ---- 热搜缓存 TTL（秒）----
-    hotspot_cache_ttl: int = 3600
-
     # ---- 日志 ----
     log_level: str = "INFO"
     log_dir: str = str(DATA_DIR / "logs")

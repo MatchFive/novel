@@ -51,12 +51,75 @@ CREATE_TABLES = [
     "DROP TABLE IF EXISTS message_embeddings",
 ]
 
+# Order matters: drop short-fiction tables first (they reference projects), then
+# remove sessions tied to short projects, then the short projects themselves, and
+# finally any sessions whose project no longer exists. Each step is wrapped in
+# a broad OperationalError handler so a cleanup failure cannot block startup.
 CLEANUP_SQL = [
-    "DELETE FROM projects WHERE type = 'short'",
     "DROP TABLE IF EXISTS short_settings",
     "DROP TABLE IF EXISTS short_chapters",
     "DROP TABLE IF EXISTS short_hotspots",
+    "DELETE FROM assistant_summary_embeddings WHERE session_id IN (SELECT id FROM assistant_sessions WHERE project_id IN (SELECT id FROM projects WHERE type = 'short'))",
+    "DELETE FROM assistant_messages WHERE session_id IN (SELECT id FROM assistant_sessions WHERE project_id IN (SELECT id FROM projects WHERE type = 'short'))",
+    "DELETE FROM assistant_sessions WHERE project_id IN (SELECT id FROM projects WHERE type = 'short')",
+    "DELETE FROM projects WHERE type = 'short'",
+    "DELETE FROM assistant_sessions WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects)",
 ]
+
+
+def _table_columns(cur: sqlite3.Cursor, table: str) -> set[str]:
+    cur.execute(f'PRAGMA table_info("{table}")')
+    return {row[1] for row in cur.fetchall()}
+
+
+def _remove_hotspot_sources_column(cur: sqlite3.Cursor) -> bool:
+    """Recreate user_settings without the deprecated hotspot_sources column.
+
+    SQLite does not support ALTER TABLE DROP COLUMN, so we copy the data to a
+    new table, drop the old one, and rename. Safe to run repeatedly: it only
+    executes when hotspot_sources still exists.
+    """
+    columns = _table_columns(cur, "user_settings")
+    if "hotspot_sources" not in columns:
+        print("user_settings.hotspot_sources already removed")
+        return False
+
+    if not columns:
+        print("user_settings table not found; skipping hotspot_sources cleanup")
+        return False
+
+    cur.executescript(
+        """
+        CREATE TABLE user_settings_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recursive_limit INTEGER DEFAULT 8,
+            theme TEXT DEFAULT 'light',
+            assistant_summary_threshold INTEGER DEFAULT 20,
+            assistant_max_summaries INTEGER DEFAULT 5,
+            assistant_summary_max_length INTEGER DEFAULT 1000,
+            assistant_history_recent_messages INTEGER DEFAULT 20,
+            assistant_history_top_k INTEGER DEFAULT 5,
+            content_rating TEXT DEFAULT 'standard',
+            chapter_target_words INTEGER DEFAULT 2500
+        );
+        INSERT INTO user_settings_new (
+            id, recursive_limit, theme, assistant_summary_threshold,
+            assistant_max_summaries, assistant_summary_max_length,
+            assistant_history_recent_messages, assistant_history_top_k,
+            content_rating, chapter_target_words
+        )
+        SELECT
+            id, recursive_limit, theme, assistant_summary_threshold,
+            assistant_max_summaries, assistant_summary_max_length,
+            assistant_history_recent_messages, assistant_history_top_k,
+            content_rating, chapter_target_words
+        FROM user_settings;
+        DROP TABLE user_settings;
+        ALTER TABLE user_settings_new RENAME TO user_settings;
+        """
+    )
+    print("Recreated user_settings table without hotspot_sources")
+    return True
 
 
 def migrate(db_path: Path = DB_PATH) -> None:
@@ -81,15 +144,17 @@ def migrate(db_path: Path = DB_PATH) -> None:
         cur.execute(sql)
         print(f"Executed: {sql.strip()[:60]}...")
 
+    try:
+        _remove_hotspot_sources_column(cur)
+    except sqlite3.OperationalError as exc:
+        print(f"Warning: failed to remove user_settings.hotspot_sources: {exc}")
+
     for sql in CLEANUP_SQL:
         try:
             cur.execute(sql)
             print(f"Executed cleanup: {sql.strip()[:60]}...")
         except sqlite3.OperationalError as exc:
-            if "no such table" in str(exc).lower():
-                print(f"Cleanup skipped (table already gone): {sql.strip()[:60]}...")
-            else:
-                raise
+            print(f"Warning: cleanup step skipped due to error: {exc}")
 
     conn.commit()
     conn.close()

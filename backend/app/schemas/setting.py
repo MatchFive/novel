@@ -33,7 +33,6 @@ class ModelConfigTest(BaseModel):
 
 class UserSettingUpdate(BaseModel):
     recursive_limit: Optional[int] = None
-    hotspot_sources: Optional[list] = None
     theme: Optional[str] = None
     assistant_summary_threshold: Optional[int] = None
     assistant_max_summaries: Optional[int] = None

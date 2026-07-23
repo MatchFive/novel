@@ -84,7 +84,6 @@ class UserSetting(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     recursive_limit = Column(Integer, default=8)
-    hotspot_sources = Column(JSON, default=list)
     theme = Column(String(32), default="light")
     assistant_summary_threshold = Column(Integer, default=20)
     assistant_max_summaries = Column(Integer, default=5)
@@ -97,7 +96,6 @@ class UserSetting(Base):
     def to_dict(self) -> dict:
         return {
             "recursive_limit": self.recursive_limit,
-            "hotspot_sources": self.hotspot_sources or [],
             "theme": self.theme,
             "assistant_summary_threshold": self.assistant_summary_threshold,
             "assistant_max_summaries": self.assistant_max_summaries,
