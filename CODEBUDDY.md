@@ -32,14 +32,12 @@
 ## Architecture
 
 ### Shape
-Monorepo: `backend/` (Python FastAPI service + desktop shell) and `frontend/` (React SPA). The product is a **local-only desktop novel-writing tool** — no cloud. `backend/desktop_launcher.py` starts the FastAPI server and hosts the UI in a pywebview Edge window; when pywebview/Edge is missing it falls back to the system browser. The same FastAPI app also serves the built `frontend/dist` as a SPA, so a single process is the whole app.
-
-Two fiction types exist: **long** (`project.type='long'`) and **short** (`'short'`). They are stored in **completely separate tables** and never share data access paths; `project_id` (UUID) is the universal key joining a `projects` row to its long/short data.
+Monorepo: `backend/` (Python FastAPI service + desktop shell) and `frontend/` (React SPA). The product is a **local-only desktop novel-writing tool for long fiction** — no cloud. `backend/desktop_launcher.py` starts the FastAPI server and hosts the UI in a pywebview Edge window; when pywebview/Edge is missing it falls back to the system browser. The same FastAPI app also serves the built `frontend/dist` as an SPA, so a single process is the whole app.
 
 ### Backend layering (read this before editing)
 The backend enforces a strict write-isolation model. Understanding it avoids corrupting the "change → confirm → apply" contract.
 
-- **`app/main.py` — `create_app()`** registers `@app.get("/health")` *before* calling `_mount_spa()`. The SPA catch-all (`/{full_path:path}`) returns `index.html` for every non-`api` path and 404s `api/*`. **Preserve this ordering** — moving `/health` after the SPA mount makes it return HTML instead of JSON. Routers are included in `_register_routers` with prefixes `/api`, `/api/settings`, `/api/short`, `/api/long`, `/api/assistant`, `/api/export`, `/api/graph`. `lifespan` runs `create_all()` to build SQLite tables.
+- **`app/main.py` — `create_app()`** registers `@app.get("/health")` *before* calling `_mount_spa()`. The SPA catch-all (`/{full_path:path}`) returns `index.html` for every non-`api` path and 404s `api/*`. **Preserve this ordering** — moving `/health` after the SPA mount makes it return HTML instead of JSON. Routers are included in `_register_routers` with prefixes `/api`, `/api/settings`, `/api/long`, `/api/assistant`, `/api/export`, `/api/graph`. `lifespan` runs `create_all()` to build SQLite tables.
 
 - **`app/config.py`** Pydantic `Settings` reading `.env` (see `.env.example`). Sets `DATA_DIR=data/`, `db_path=data/novel.db`, `frontend_dist=frontend/dist`, LLM defaults, `recursive_limit` defaults, and optional Neo4j creds. `database_url` is `sqlite+aiosqlite:///...`.
 
@@ -69,9 +67,7 @@ Workers use a **custom text protocol**, not OpenAI native function calling. The 
 OpenAI-compatible only (`/chat/completions`). `chat` (non-stream), `chat_stream` (SSE `data:` chunks), and `parse_llm_json` (forces `response_format=json_object`, with fenced-code and substring fallbacks). It reads base URL/key/model from `Settings`. No streaming except via `chat_stream`.
 
 ### Supporting services
-- **`services/short_story.py`** — the short-fiction **six-step method** (hook → plans → select → detail → chapters → write → integrate), all persisted incrementally into `short_settings.step`/`plans`/`writing`/etc. Frontend resumes via `GET /{id}/progress`.
-- **`services/hotspot.py`** — fetches trending topics by **URL + adapter** from `user_settings.hotspot_sources` (no crawler), with a SQLite-backed TTL cache.
-- **`services/export.py`** — `render_markdown_long/short` and a JSON project dump; `api/export.py` serves `GET /{project_id}?fmt=markdown|json`. **Export filenames must stay ASCII** (Latin-1 safe) — keep any dynamic naming ASCII-only.
+- **`services/export.py`** — `render_markdown_long` and a JSON project dump; `api/export.py` serves `GET /{project_id}?fmt=markdown|json`. **Export filenames must stay ASCII** (Latin-1 safe) — keep any dynamic naming ASCII-only.
 - **`app/graph/client.py` + `api/graph.py`** — knowledge graph. `get_graph()` returns `None` when Neo4j is disabled, and the API **degrades to SQLite relation queries** (character `relations` + foreshadow nodes). Always code for the `source: "sqlite"` path being the default.
 - **`api/long_continue.py`** — `POST /continue/{project_id}/continue` SSE stream; assembles outline/character/foreshadow/recent-chapter context and streams continuation via `chat_stream`.
 
@@ -79,4 +75,4 @@ OpenAI-compatible only (`/chat/completions`). `chat` (non-stream), `chat_stream`
 `app/core/errors.py` defines `AppError(code, status_code)` subclasses (`NotFoundError`, `ValidationError`, `ConflictError`) and registers handlers returning `{"ok":False,"code":...,"message":...}`. Raise `AppError` subclasses (not raw `Exception`) from API/services so the client gets a consistent shape.
 
 ### Frontend
-React 19 + TypeScript + Vite + Tailwind with a **Lovart black/white/gray, zero-radius, 1px-line** aesthetic (see `src/index.css`). `src/api/client.ts` is the axios base (targets `/api`); per-domain wrappers live in `src/api/*.ts`. State is Zustand. Routes (`src/App.tsx`): `/` Home, `/settings`, `/project/long/:id` (LongWorkspace, multi-tab: outline/character/foreshadow/world/plot/chapter/graph/assistant + GraphPanel), `/project/short/:id` (ShortStudio six-step + hotspot panel). The dev server proxies `/api`; the production build is served by the backend, so **always rebuild `frontend/dist` after frontend changes** for desktop runs.
+React 19 + TypeScript + Vite + Tailwind. `src/api/client.ts` is the axios base (targets `/api`); per-domain wrappers live in `src/api/*.ts`. State is Zustand. Routes (`src/App.tsx`): `/` Home, `/settings`, `/project/long/:id` (LongWorkspace, multi-tab: outline/character/foreshadow/world/plot/chapter/graph/assistant + GraphPanel). The dev server proxies `/api`; the production build is served by the backend, so **always rebuild `frontend/dist` after frontend changes** for desktop runs.

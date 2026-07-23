@@ -4,13 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Novel Studio is a local-only desktop novel-writing application. The repository is a monorepo with a Python FastAPI backend and a React/TypeScript frontend.
+Novel Studio is a local-only desktop novel-writing application for long fiction. The repository is a monorepo with a Python FastAPI backend and a React/TypeScript frontend.
 
 - **Backend**: FastAPI + SQLAlchemy 2.0 async + SQLite (`data/novel.db`). Serves the built frontend as an SPA and exposes `/api/*`.
 - **Desktop shell**: `backend/desktop_launcher.py` starts uvicorn in a daemon thread, waits for `/health`, then opens a pywebview window using the system WebView (Edge on Windows, with CEF/browser fallback).
 - **Frontend**: React 19 + TypeScript + Vite + Tailwind. Dev server proxies `/api` to `http://127.0.0.1:8765`. Production output is `frontend/dist`, which the backend serves.
-
-Fiction projects are either **long** (`project.type='long'`) or **short** (`'short'`). They live in completely separate tables; `project_id` is the universal key.
 
 ## Common commands
 
@@ -70,7 +68,7 @@ After frontend changes, rebuild `frontend/dist` with `npm run build` before test
 
 ### Backend layering
 
-- `app/main.py` defines `create_app()`. Routers are registered with prefixes `/api`, `/api/settings`, `/api/short`, `/api/long`, `/api/assistant`, `/api/export`, `/api/graph`. The `/health` endpoint is registered **before** the SPA catch-all in `/_mount_spa`; keep that order or `/health` will return HTML.
+- `app/main.py` defines `create_app()`. Routers are registered with prefixes `/api`, `/api/settings`, `/api/long`, `/api/assistant`, `/api/export`, `/api/graph`. The `/health` endpoint is registered **before** the SPA catch-all in `/_mount_spa`; keep that order or `/health` will return HTML.
 - `app/config.py` is a Pydantic `Settings` object reading `.env`. Defines `DATA_DIR=data/`, `db_path=data/novel.db`, `frontend_dist=frontend/dist`, LLM settings, and optional Neo4j settings.
 - `app/database.py` holds the async engine, `AsyncSessionLocal`, and the `get_db` dependency.
 - `app/models.py` holds all SQLAlchemy ORM models. Notable columns:
@@ -106,9 +104,7 @@ Workers use a custom text protocol, not native OpenAI function calling. The LLM 
 
 ### Key services
 
-- `services/short_story.py`: the short-fiction six-step method (hook → plans → select → detail → chapters → write → integrate). Progress is resumed via `GET /api/short/{id}/progress`.
-- `services/hotspot.py`: fetches trending topics from configured URL + adapter pairs in `user_settings.hotspot_sources`; no local crawler.
-- `services/export.py`: renders Markdown/JSON for long and short projects. Dynamic export filenames must stay ASCII/Latin-1 safe.
+- `services/export.py`: renders Markdown/JSON for long-fiction projects. Dynamic export filenames must stay ASCII/Latin-1 safe.
 - `services/change_apply.py`: the single write entry described above.
 - `app/graph/client.py` + `api/graph.py`: knowledge graph. `get_graph()` returns `None` when Neo4j is disabled; the API falls back to SQLite relation queries.
 - `api/long_continue.py`: `POST /api/long/{project_id}/continue` provides SSE streaming continuation by assembling outline/character/foreshadow/recent-chapter context and calling `chat_stream`.
@@ -121,8 +117,7 @@ Workers use a custom text protocol, not native OpenAI function calling. The LLM 
 
 - `src/api/client.ts` is the axios base targeting `/api`; per-domain wrappers live in `src/api/*.ts`.
 - State is managed with Zustand (`src/stores/`).
-- Routes in `src/App.tsx`: `/` Home, `/settings`, `/project/long/:id` (LongWorkspace), `/project/short/:id` (ShortStudio).
-- The visual style is Lovart black/white/gray, zero border radius, 1px borders, defined in `src/index.css`.
+- Routes in `src/App.tsx`: `/` Home, `/settings`, `/project/long/:id` (LongWorkspace).
 - `tsconfig.json` has `noImplicitAny: false`. Do not re-enable it without fixing all implicit-`any` sites.
 
 ## Environment

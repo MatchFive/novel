@@ -68,18 +68,6 @@ export default function SettingsPage() {
   const updateAssistantSetting = (key: keyof UserSettings, value: number) =>
     saveSettings({ [key]: value } as Partial<UserSettings>);
 
-  const addHotspot = () => {
-    const src = [...(settings.hotspot_sources || []), { url: "", name: "" }];
-    saveSettings({ hotspot_sources: src });
-  };
-  const updHotspot = (i: number, key: string, val: string) => {
-    const src = settings.hotspot_sources.map((s, idx) => (idx === i ? { ...s, [key]: val } : s));
-    saveSettings({ hotspot_sources: src });
-  };
-  const delHotspot = (i: number) => {
-    saveSettings({ hotspot_sources: settings.hotspot_sources.filter((_, idx) => idx !== i) });
-  };
-
   const startEdit = (m: ModelConfig) => {
     setEditingId(m.id);
     setEditForm({
@@ -149,20 +137,6 @@ export default function SettingsPage() {
             className="accent-accent"
           />
           <span className="text-sm tabular-nums text-ink">{settings.recursive_limit}</span>
-        </div>
-      </Card>
-
-      <Card className="mt-6">
-        <div className="border-b border-line px-4 py-3 font-serif text-sm font-medium text-ink">热搜源（请求 URL + 适配器）</div>
-        <div className="space-y-2 p-4">
-          {settings.hotspot_sources.map((s, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <Input placeholder="名称" value={s.name || ""} onChange={(e) => updHotspot(i, "name", e.target.value)} />
-              <Input placeholder="https://..." value={s.url || ""} onChange={(e) => updHotspot(i, "url", e.target.value)} />
-              <Button variant="ghost" onClick={() => delHotspot(i)}>删</Button>
-            </div>
-          ))}
-          <Button variant="ghost" onClick={addHotspot}>+ 添加热搜源</Button>
         </div>
       </Card>
 
