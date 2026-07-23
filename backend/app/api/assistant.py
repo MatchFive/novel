@@ -99,8 +99,9 @@ def _detect_compound_intent(user_input: str) -> dict | None:
     text = user_input.lower()
     has_character = any(kw in text for kw in ("角色", "人物", "主角", "配角", "龙套", "npc", "性格", "能力", "关系", "命运"))
     has_world = any(kw in text for kw in ("世界观", "设定", "规则", "体系", "境界", "力量", "信仰", "神格"))
-    has_outline = any(kw in text for kw in ("大纲", "总纲", "章节结构", "主线", "支线", "起承转合"))
+    has_outline_modify = any(kw in text for kw in ("完善大纲", "调整大纲", "更新大纲", "修改大纲", "重写大纲", "补充大纲", "优化大纲"))
     has_plot = any(kw in text for kw in ("剧情", "桥段", "事件", "情节"))
+    has_foreshadow = any(kw in text for kw in ("伏笔", "悬念", "回收", "呼应", "预埋", "暗线", "徽章", "线索", "暗示"))
 
     tasks: list[dict] = []
     if has_character:
@@ -109,11 +110,26 @@ def _detect_compound_intent(user_input: str) -> dict | None:
         tasks.append({"worker": "world", "goal": "为项目新增或调整世界观设定"})
     if has_plot:
         tasks.append({"worker": "plot", "goal": "为项目编排剧情节点/桥段/事件"})
-    if has_outline:
+    if has_outline_modify:
         tasks.append({"worker": "outline", "goal": "根据用户指令完善或更新现有大纲，只修改大纲内容"})
+    if has_foreshadow:
+        tasks.append({"worker": "foreshadow", "goal": "根据用户目标新增或调整伏笔条目，不要修改大纲、角色或世界观"})
 
     if len(tasks) > 1:
         return {"intent": user_input, "tasks": tasks}
+    return None
+
+
+def _detect_foreshadow_intent(user_input: str) -> dict | None:
+    """单独识别'埋伏笔/线索/悬念'类指令，避免被 supervisor 误派给 outline。"""
+    text = user_input.lower()
+    has_foreshadow = any(kw in text for kw in ("伏笔", "悬念", "回收", "呼应", "预埋", "暗线", "徽章", "线索", "暗示"))
+    has_outline_modify = any(kw in text for kw in ("完善大纲", "调整大纲", "更新大纲", "修改大纲", "重写大纲", "补充大纲", "优化大纲"))
+    if has_foreshadow and not has_outline_modify:
+        return {
+            "intent": user_input,
+            "tasks": [{"worker": "foreshadow", "goal": "根据用户目标新增或调整伏笔条目，不要修改大纲、角色或世界观"}],
+        }
     return None
 
 
@@ -336,66 +352,76 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
             logger.warning("Assistant chapter generation rule plan: %s", chapter_plan)
             plan = chapter_plan
         else:
-            # 2. Supervisor 拆分（使用不含当前用户输入的 messages，当前输入单独传入）
-            supervisor_prompt = (
-                "你是小说创作助手的调度器。根据用户指令与项目现有数据，判断需要派发哪些专精 Worker 来处理。"
-                "可选 Worker：character（角色设计/调整）、world（世界观设定）、outline（大纲生成/调整）、"
-                "plot（剧情节点编排）、foreshadow（伏笔埋设/回收）、outline_split（拆分已有大纲为时期/卷）、"
-                "broad_outline（项目级总纲生成/更新）、plot_nodes（从总纲抽取关键剧情节点）、"
-                "assignment（把剧情节点分配到已有/新建章节）、chapter_outline（生成单个章节细纲）、"
-                "chapter_text（生成单个章节正文）。请返回 JSON："
-                '{"intent": "一句话意图", "tasks": [{"worker": "character", "goal": "..."}, ...]}。\n\n'
-                "Worker 选择规则（严格按内容归类，禁止把世界观/规则类指令派给 outline）：\n"
-                "- world（世界观）：只要用户在新增/修改世界观、设定、力量体系、修炼境界、社会规则、"
-                "历史背景、地理环境、种族、宗教、神话、盟约/契约/法则/禁令，或出现'世界观''设定''规则''体系'等词，"
-                "就必须派给 world。此类指令绝不能派给 outline。\n"
-                "- character：用户明确提到角色、人物、主角、配角、龙套、NPC、性格、能力、关系、命运。"
-                "配角/NPC/龙套都必须由 character worker 创建，绝不能由 outline worker 创建。\n"
-                "- outline：仅当用户明确提到传统大纲、章节结构、起承转合、主线/支线安排，或说'完善大纲/调整大纲/更新大纲'时才派给 outline。"
-                "outline worker 只修改大纲，不能创建或修改角色、世界观。\n"
-                "- outline_split：用户说“拆分大纲/把这条大纲拆成几卷/拆成时期”等，且上下文提供了 entity_id 时，派给 outline_split。\n"
-                "- broad_outline：用户说“生成/重新生成总纲/项目大纲/整体大纲”时派给 broad_outline。\n"
-                "- plot_nodes：用户说“生成剧情节点/桥段/关键事件”时派给 plot_nodes。\n"
-                "- assignment：用户说“分配章节/把剧情节点分配到章节/把桥段分配到章节”时派给 assignment。\n"
-                "- chapter_outline：用户说“生成细纲/章节大纲/写第 X 章细纲”时派给 chapter_outline。\n"
-                "- chapter_text：用户说“生成正文/写第 X 章/写正文”时派给 chapter_text。\n"
-                "- plot：用户提到具体剧情、事件、桥段、时间线节点但不涉及分配时。\n"
-                "- foreshadow：用户提到伏笔、悬念、回收/呼应。\n\n"
-                "复合意图处理（必须遵守）：若用户一条指令里同时涉及多个实体类型，必须拆分为多个 task，每个 task 只派给一个对应 worker。"
-                "例如同时涉及'角色'和'大纲'，就要分别派发 character 和 outline，不能只用 outline 去创建角色。"
-                "tasks 数组的顺序必须按依赖关系排列：先生成/修改前置实体（如角色），后基于这些实体完善下游内容（如大纲）。\n\n"
-                "若指令涉及当前上下文中的 entity_type/entity_id，应优先派给对应 worker（如果 project_id 可用）。"
-                f"{context_note}\n\n"
-                "示例（只输出 JSON，不要解释）：\n"
-                '用户：新增世界观设定：这是一个修仙世界，境界分为炼气、筑基。\n'
-                '输出：{"intent": "新增修仙世界观", "tasks": [{"worker": "world", "goal": "新增修仙世界观设定，境界划分为炼气、筑基"}]}\n'
-                '用户：生成前5章总纲。\n'
-                '输出：{"intent": "生成前5章总纲", "tasks": [{"worker": "broad_outline", "goal": "生成前5章总纲"}]}\n'
-                '用户：生成剧情节点。\n'
-                '输出：{"intent": "生成剧情节点", "tasks": [{"worker": "plot_nodes", "goal": "生成剧情节点"}]}\n'
-                '用户：把剧情节点分配到章节。\n'
-                '输出：{"intent": "分配剧情节点到章节", "tasks": [{"worker": "assignment", "goal": "把剧情节点分配到章节"}]}\n'
-                '用户：生成第1章细纲。\n'
-                '输出：{"intent": "生成第1章细纲", "tasks": [{"worker": "chapter_outline", "goal": "生成第1章细纲"}]}\n'
-                '用户：写第1章正文。\n'
-                '输出：{"intent": "生成第1章正文", "tasks": [{"worker": "chapter_text", "goal": "生成第1章正文"}]}\n'
-                '用户：主角性格应该更沉稳。\n'
-                '输出：{"intent": "调整主角性格", "tasks": [{"worker": "character", "goal": "调整主角性格，使其更沉稳"}]}\n'
-                '用户：把这条大纲拆成几卷。\n'
-                '输出：{"intent": "拆分大纲为卷", "tasks": [{"worker": "outline_split", "goal": "把当前大纲条目拆成时期/卷结构"}]}\n'
-                '用户：加上一些配角，并完善大纲。\n'
-                '输出：{"intent": "新增配角并完善大纲", "tasks": [{"worker": "character", "goal": "为项目新增一批配角，包括姓名、年龄、身份、性格、与主角关系等"}, {"worker": "outline", "goal": "根据新增配角完善现有大纲"}]}\n'
-                '用户：加上一些配角，完善大纲。\n'
-                '输出：{"intent": "新增配角并完善大纲", "tasks": [{"worker": "character", "goal": "为项目新增一批配角"}, {"worker": "outline", "goal": "根据新增配角完善现有大纲"}]}\n\n'
-                "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。"
-            )
-            supervisor_msgs = [
-                {"role": "system", "content": supervisor_prompt},
-                *history_context,
-                {"role": "user", "content": user_input},
-            ]
-            supervisor_llm = await get_llm_client(db, level="medium")
-            plan = await run_supervisor(supervisor_llm, supervisor_msgs)
+            # 2. 伏笔/悬念类指令直接派给 foreshadow，避免被 supervisor 误判为 outline 修改
+            foreshadow_plan = _detect_foreshadow_intent(user_input)
+            if foreshadow_plan is not None:
+                logger.warning("Assistant foreshadow rule plan: %s", foreshadow_plan)
+                plan = foreshadow_plan
+            else:
+                # 2. Supervisor 拆分（使用不含当前用户输入的 messages，当前输入单独传入）
+                supervisor_prompt = (
+                    "你是小说创作助手的调度器。根据用户指令与项目现有数据，判断需要派发哪些专精 Worker 来处理。"
+                    "可选 Worker：character（角色设计/调整）、world（世界观设定）、outline（大纲生成/调整）、"
+                    "plot（剧情节点编排）、foreshadow（伏笔埋设/回收）、outline_split（拆分已有大纲为时期/卷）、"
+                    "broad_outline（项目级总纲生成/更新）、plot_nodes（从总纲抽取关键剧情节点）、"
+                    "assignment（把剧情节点分配到已有/新建章节）、chapter_outline（生成单个章节细纲）、"
+                    "chapter_text（生成单个章节正文）。请返回 JSON："
+                    '{"intent": "一句话意图", "tasks": [{"worker": "character", "goal": "..."}, ...]}。\n\n'
+                    "Worker 选择规则（严格按内容归类，禁止把世界观/规则类指令派给 outline）：\n"
+                    "- world（世界观）：只要用户在新增/修改世界观、设定、力量体系、修炼境界、社会规则、"
+                    "历史背景、地理环境、种族、宗教、神话、盟约/契约/法则/禁令，或出现'世界观''设定''规则''体系'等词，"
+                    "就必须派给 world。此类指令绝不能派给 outline。\n"
+                    "- character：用户明确提到角色、人物、主角、配角、龙套、NPC、性格、能力、关系、命运。"
+                    "配角/NPC/龙套都必须由 character worker 创建，绝不能由 outline worker 创建。\n"
+                    "- outline：仅当用户明确说'完善大纲/调整大纲/更新大纲/修改大纲/重写大纲'等时才派给 outline。"
+                    "outline worker 只修改大纲，不能创建或修改角色、世界观、伏笔。\n"
+                    "- outline_split：用户说“拆分大纲/把这条大纲拆成几卷/拆成时期”等，且上下文提供了 entity_id 时，派给 outline_split。\n"
+                    "- broad_outline：用户说“生成/重新生成总纲/项目大纲/整体大纲”时派给 broad_outline。\n"
+                    "- plot_nodes：用户说“生成剧情节点/桥段/关键事件”时派给 plot_nodes。\n"
+                    "- assignment：用户说“分配章节/把剧情节点分配到章节/把桥段分配到章节”时派给 assignment。\n"
+                    "- chapter_outline：用户说“生成细纲/章节大纲/写第 X 章细纲”时派给 chapter_outline。\n"
+                    "- chapter_text：用户说“生成正文/写第 X 章/写正文”时派给 chapter_text。\n"
+                    "- plot：用户提到具体剧情、事件、桥段、时间线节点但不涉及分配时。\n"
+                    "- foreshadow：用户提到伏笔、悬念、回收/呼应、线索、徽章、暗示等。"
+                    "只要用户说'埋个伏笔/留个悬念/设个线索'，就必须派给 foreshadow，不能派给 outline，"
+                    "即使用户提到'大纲里的某某'也只是作为上下文引用，不代表要修改大纲。\n\n"
+                    "复合意图处理（必须遵守）：若用户一条指令里同时涉及多个实体类型，必须拆分为多个 task，每个 task 只派给一个对应 worker。"
+                    "例如同时涉及'角色'和'大纲'，就要分别派发 character 和 outline，不能只用 outline 去创建角色。"
+                    "tasks 数组的顺序必须按依赖关系排列：先生成/修改前置实体（如角色），后基于这些实体完善下游内容（如大纲）。\n\n"
+                    "若指令涉及当前上下文中的 entity_type/entity_id，应优先派给对应 worker（如果 project_id 可用）。"
+                    f"{context_note}\n\n"
+                    "示例（只输出 JSON，不要解释）：\n"
+                    '用户：新增世界观设定：这是一个修仙世界，境界分为炼气、筑基。\n'
+                    '输出：{"intent": "新增修仙世界观", "tasks": [{"worker": "world", "goal": "新增修仙世界观设定，境界划分为炼气、筑基"}]}\n'
+                    '用户：生成前5章总纲。\n'
+                    '输出：{"intent": "生成前5章总纲", "tasks": [{"worker": "broad_outline", "goal": "生成前5章总纲"}]}\n'
+                    '用户：生成剧情节点。\n'
+                    '输出：{"intent": "生成剧情节点", "tasks": [{"worker": "plot_nodes", "goal": "生成剧情节点"}]}\n'
+                    '用户：把剧情节点分配到章节。\n'
+                    '输出：{"intent": "分配剧情节点到章节", "tasks": [{"worker": "assignment", "goal": "把剧情节点分配到章节"}]}\n'
+                    '用户：生成第1章细纲。\n'
+                    '输出：{"intent": "生成第1章细纲", "tasks": [{"worker": "chapter_outline", "goal": "生成第1章细纲"}]}\n'
+                    '用户：写第1章正文。\n'
+                    '输出：{"intent": "生成第1章正文", "tasks": [{"worker": "chapter_text", "goal": "生成第1章正文"}]}\n'
+                    '用户：主角性格应该更沉稳。\n'
+                    '输出：{"intent": "调整主角性格", "tasks": [{"worker": "character", "goal": "调整主角性格，使其更沉稳"}]}\n'
+                    '用户：把这条大纲拆成几卷。\n'
+                    '输出：{"intent": "拆分大纲为卷", "tasks": [{"worker": "outline_split", "goal": "把当前大纲条目拆成时期/卷结构"}]}\n'
+                    '用户：前期可以埋个伏笔，比如主角捡到一枚神秘徽章。\n'
+                    '输出：{"intent": "新增神秘徽章伏笔", "tasks": [{"worker": "foreshadow", "goal": "新增神秘徽章伏笔，说明触发时机与后续回收方向"}]}\n'
+                    '用户：加上一些配角，并完善大纲。\n'
+                    '输出：{"intent": "新增配角并完善大纲", "tasks": [{"worker": "character", "goal": "为项目新增一批配角，包括姓名、年龄、身份、性格、与主角关系等"}, {"worker": "outline", "goal": "根据新增配角完善现有大纲"}]}\n'
+                    '用户：加上一些配角，完善大纲。\n'
+                    '输出：{"intent": "新增配角并完善大纲", "tasks": [{"worker": "character", "goal": "为项目新增一批配角"}, {"worker": "outline", "goal": "根据新增配角完善现有大纲"}]}\n\n'
+                    "若指令与长篇数据无关，返回 {\"intent\": \"...\", \"tasks\": []}。"
+                )
+                supervisor_msgs = [
+                    {"role": "system", "content": supervisor_prompt},
+                    *history_context,
+                    {"role": "user", "content": user_input},
+                ]
+                supervisor_llm = await get_llm_client(db, level="medium")
+                plan = await run_supervisor(supervisor_llm, supervisor_msgs)
 
         # 规则化兜底：复合意图与 supervisor 计划做并集合并，
         # 保留 supervisor 已识别的 worker，只补追加规则命中但缺失的 worker
