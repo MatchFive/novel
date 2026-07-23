@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { longApi } from "@/api/long";
 import { graphApi } from "@/api/graph";
-import { assistantApi } from "@/api/short";
+import { assistantApi } from "@/api/assistant";
 import { useAssistantSession } from "@/stores/useAssistantSession";
 import { useConfirm } from "@/hooks/useConfirm";
 import { ChapterList } from "@/components/chapter/ChapterList";

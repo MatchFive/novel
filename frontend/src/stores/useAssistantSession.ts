@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { assistantApi } from "@/api/short";
+import { assistantApi } from "@/api/assistant";
 import type { AssistantMessage, AssistantSession, AutoAppliedItem, ChangeRecord } from "@/types";
 
 interface AssistantSessionState {
