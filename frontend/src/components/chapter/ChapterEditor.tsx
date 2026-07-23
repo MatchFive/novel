@@ -100,7 +100,7 @@ export function ChapterEditor({ chapter, onSave, onUndo, undoable }: ChapterEdit
               const v = Number(e.target.value);
               if (!Number.isNaN(v) && v >= 1) setOrder(v);
             }}
-            className="!w-12 px-1 text-center [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
+            className="!w-[3.75rem] px-1 text-center [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [-moz-appearance:textfield]"
           />
           <span className="text-sm text-muted">章</span>
         </div>
