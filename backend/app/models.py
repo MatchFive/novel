@@ -1,4 +1,4 @@
-"""全部 ORM 模型：projects / long_* / short_* / 公共。"""
+"""全部 ORM 模型：projects / long_* / 公共。"""
 from __future__ import annotations
 
 import uuid
@@ -35,7 +35,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(CHAR(36), primary_key=True, default=_uuid)
-    type = Column(Enum("long", "short", name="project_type"), nullable=False, index=True)
+    type = Column(Enum("long", name="project_type"), nullable=False, index=True)
     title = Column(String(255), nullable=False, default="未命名")
     description = Column(Text, default="")
     created_at = Column(DateTime, default=_now, nullable=False)
@@ -295,41 +295,3 @@ class LongChangeRecord(Base):
     created_at = Column(DateTime, default=_now)
 
 
-# ---------------- 短篇小说数据（与长篇完全分表） ----------------
-
-class ShortSetting(Base):
-    __tablename__ = "short_settings"
-
-    id = Column(CHAR(36), ForeignKey("projects.id"), primary_key=True)
-    core_hook = Column(Text, default="")          # 爽点
-    plans = Column(JSON, default=list)           # 方案列表
-    selected_plan = Column(JSON, default=None)    # 选定方案
-    detail_plan = Column(Text, default="")       # 详细规划
-    chapters_plan = Column(JSON, default=list)    # 章节规划
-    writing = Column(JSON, default=list)          # 各章节正文
-    integration = Column(Text, default="")        # 整合结果
-    step = Column(Integer, default=0)            # 当前步骤
-    updated_at = Column(DateTime, default=_now, onupdate=_now)
-
-
-class ShortChapter(Base):
-    __tablename__ = "short_chapters"
-
-    id = Column(CHAR(36), primary_key=True, default=_uuid)
-    project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
-    title = Column(String(255), default="")
-    content = Column(Text, default="")
-    order = Column(Integer, default=0)
-
-
-class ShortHotspot(Base):
-    __tablename__ = "short_hotspots"
-
-    id = Column(CHAR(36), primary_key=True, default=_uuid)
-    project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
-    source = Column(String(255), default="")
-    title = Column(String(512), default="")
-    url = Column(Text, default="")
-    analysis = Column(JSON, default=None)
-    used = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=_now)

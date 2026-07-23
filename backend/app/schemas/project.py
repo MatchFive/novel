@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class ProjectCreate(BaseModel):
-    type: str = Field(..., pattern="^(long|short)$")
+    type: str = Field(..., pattern="^long$")
     title: str = "未命名"
     description: str = ""
 

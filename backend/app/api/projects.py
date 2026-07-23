@@ -14,7 +14,7 @@ router = APIRouter(tags=["projects"])
 
 @router.get("", response_model=list[ProjectOut])
 async def list_projects(
-    type: str | None = Query(None, pattern="^(long|short)$"),
+    type: str | None = Query(None, pattern="^long$"),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Project)
