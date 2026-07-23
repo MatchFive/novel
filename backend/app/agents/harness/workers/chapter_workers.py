@@ -580,14 +580,23 @@ class ChapterTextWorker(WorkerBase):
         if not content:
             return {"changes": [], "stage": "chapter_text", "error": "正文生成失败", "notes": notes}
 
-        # —— 一致性审校：发现问题带反馈重写一次 ——
-        review_issues = await self._review_text(content, chapter, characters, world, active, previous_chapter_text_tail=prev_tail)
-        if review_issues:
+        # —— 一致性审校：发现问题带反馈重写，最多循环 5 次 ——
+        for attempt in range(5):
+            review_issues = await self._review_text(
+                content, chapter, characters, world, active, previous_chapter_text_tail=prev_tail
+            )
+            if not review_issues:
+                notes.append(f"一致性审校通过（第 {attempt + 1} 次）")
+                break
             rewritten = await self._rewrite_with_feedback(system, history_context, content, review_issues)
             if rewritten:
                 content = rewritten
+                notes.append(f"第 {attempt + 1} 次审校发现 {len(review_issues)} 处问题并已修正")
             else:
-                notes.append("一致性审校发现问题但重写失败，已保留原文")
+                notes.append(f"第 {attempt + 1} 次审校发现 {len(review_issues)} 处问题但重写失败，已保留原文")
+                break
+        else:
+            notes.append("一致性审校已达最大循环次数（5 次），仍可能存在未解决问题")
 
         # —— 尺度检查 + 自动改写一次，改写后复核 ——
         rating_issues = await self._rating_check(content, rating)
