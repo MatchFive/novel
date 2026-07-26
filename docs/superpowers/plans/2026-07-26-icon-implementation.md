@@ -4,13 +4,13 @@
 
 **Goal:** 基于已批准的图标设计规范，生成 SVG/PNG/ICO 图标资源，并将其接入 PyInstaller 可执行文件、pywebview 窗口和前端 favicon。
 
-**Architecture:** 以 `assets/icon.svg` 为唯一矢量源，通过 `scripts/generate_icons.py` 批量渲染出各尺寸 PNG 与 ICO；PyInstaller 使用 `assets/icon.ico`，pywebview 窗口使用 `assets/icon-256.png`，前端使用 `frontend/public/favicon.*`。
+**Architecture:** `scripts/generate_icons.py` 同时维护矢量源文件 `assets/icon.svg` 与位图资源；PNG/ICO 使用 Pillow 直接绘制，避免 Windows 上依赖外部 Cairo DLL。PyInstaller 使用 `assets/icon.ico`，pywebview 窗口使用 `assets/icon-256.png`，前端使用 `frontend/public/favicon.*`。
 
-**Tech Stack:** Python 3.11+、Pillow、cairosvg、PyInstaller、pywebview、React + Vite。
+**Tech Stack:** Python 3.11+、Pillow、PyInstaller、pywebview、React + Vite。
 
 ## Global Constraints
 
-- 图标源文件必须唯一：`assets/icon.svg`。
+- 图标几何描述必须同时驱动 SVG 与 PNG/ICO，避免两份源文件不同步。
 - 输出尺寸：16、32、48、256、512、1024（PNG）；ICO 包含 16/32/48/256。
 - 色彩严格使用设计规范：`#f5efe4`、 `#6b4f3a`、 `#a64b2a`。
 - Windows 为主要目标平台；macOS `.icns` 不在本次范围。
@@ -27,15 +27,14 @@
 
 **Interfaces:**
 - Consumes: 无
-- Produces: `backend/requirements.txt` 包含 `Pillow` 与 `cairosvg`
+- Produces: `backend/requirements.txt` 包含 `Pillow`
 
-- [ ] **Step 1: 在 `backend/requirements.txt` 追加 Pillow 和 cairosvg**
+- [ ] **Step 1: 在 `backend/requirements.txt` 追加 Pillow**
 
   在文件末尾添加：
 
   ```text
   Pillow==10.4.0
-  cairosvg==2.7.1
   ```
 
 - [ ] **Step 2: 在 backend 虚拟环境中安装依赖**
@@ -46,14 +45,14 @@
   pip install -r requirements.txt
   ```
 
-  Expected: `Successfully installed Pillow-10.4.0 cairosvg-2.7.1`（或兼容版本）。
+  Expected: `Successfully installed Pillow-10.4.0`（或兼容版本）。
 
 - [ ] **Step 3: 验证导入**
 
   Run:
   ```bash
   cd backend
-  python -c "from PIL import Image; import cairosvg; print('ok')"
+  python -c "from PIL import Image; print('ok')"
   ```
 
   Expected: 输出 `ok`。
@@ -62,7 +61,7 @@
 
   ```bash
   git add backend/requirements.txt
-  git commit -m "chore(deps): add Pillow and cairosvg for icon generation"
+  git commit -m "chore(deps): add Pillow for icon generation"
   ```
 
 ---
@@ -135,37 +134,114 @@
 - Modify: `tests/scripts/test_generate_icons.py`
 
 **Interfaces:**
-- Consumes: `assets/icon.svg`
-- Produces: `assets/icon-{size}.png`（size ∈ {16,32,48,256,512,1024}）、`assets/icon.ico`、`frontend/public/favicon.ico`、`frontend/public/favicon-16x16.png`、`frontend/public/favicon-32x32.png`
+- Consumes: 无（脚本内部定义几何参数，不读取 SVG 渲染）
+- Produces: `assets/icon.svg`、`assets/icon-{size}.png`（size ∈ {16,32,48,256,512,1024}）、`assets/icon.ico`、`frontend/public/favicon.ico`、`frontend/public/favicon-16x16.png`、`frontend/public/favicon-32x32.png`
 
 - [ ] **Step 1: 编写 `scripts/generate_icons.py`**
 
   ```python
-  """基于 assets/icon.svg 生成各尺寸 PNG 与 ICO 图标。"""
+  """生成 Novel Studio 图标资源。
+
+  脚本内部定义图标几何，同时输出 SVG 源文件与各尺寸 PNG/ICO。
+  使用 Pillow 直接绘制 PNG/ICO，避免 Windows 对 Cairo DLL 的依赖。
+  """
   from __future__ import annotations
 
   import struct
   from pathlib import Path
 
-  import cairosvg
-  from PIL import Image
+  from PIL import Image, ImageDraw
 
   REPO_ROOT = Path(__file__).parent.parent
-  SVG_PATH = REPO_ROOT / "assets" / "icon.svg"
   ASSETS_DIR = REPO_ROOT / "assets"
   PUBLIC_DIR = REPO_ROOT / "frontend" / "public"
 
   SIZES = [16, 32, 48, 256, 512, 1024]
 
+  # 设计规范色值
+  PAGE_FILL = "#f5efe4"
+  PAGE_STROKE = "#6b4f3a"
+  ARC_STROKE = "#a64b2a"
+  TEXT_STROKE = "#8c6b4f"
+
+  # 64x64 viewBox 下的几何参数
+  PAGE_RECT = (6, 10, 58, 54)
+  PAGE_RADIUS = 3
+  ARC_POINTS = [(12, 46), (18, 50), (24, 42), (36, 36), (52, 28)]
+  TEXT_LINES = [((12, 24), (32, 24)), ((12, 32), (28, 32))]
+
+
+  def _quadratic_bezier_points(p0: tuple, p1: tuple, p2: tuple, steps: int = 20) -> list[tuple]:
+      points = []
+      for i in range(steps + 1):
+          t = i / steps
+          x = (1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t**2 * p2[0]
+          y = (1 - t) ** 2 * p0[1] + 2 * (1 - t) * t * p1[1] + t**2 * p2[1]
+          points.append((x, y))
+      return points
+
+
+  def _smooth_curve_points(points: list[tuple], steps: int = 20) -> list[tuple]:
+      """把 ARC_POINTS 视为连续二次贝塞尔控制点序列，生成平滑曲线。"""
+      if len(points) < 3:
+          return points
+      result = [points[0]]
+      for i in range(0, len(points) - 2, 2):
+          p0 = points[i]
+          p1 = points[i + 1]
+          p2 = points[i + 2]
+          segment = _quadratic_bezier_points(p0, p1, p2, steps)
+          result.extend(segment[1:])
+      return result
+
+
+  def draw_icon(size: int) -> Image.Image:
+      """使用 Pillow 绘制指定尺寸的图标。"""
+      scale = size / 64.0
+      img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+      draw = ImageDraw.Draw(img)
+
+      def s(value: float) -> float:
+          return value * scale
+
+      def s_tuple(rect: tuple) -> tuple:
+          return tuple(s(v) for v in rect)
+
+      # 书页底色（圆角矩形）
+      page_box = s_tuple(PAGE_RECT)
+      radius = s(PAGE_RADIUS)
+      draw.rounded_rectangle(page_box, radius=radius, fill=PAGE_FILL)
+      # 书页描边
+      draw.rounded_rectangle(page_box, radius=radius, outline=PAGE_STROKE, width=max(1, int(3 * scale)))
+
+      # 叙事弧线
+      arc = _smooth_curve_points(ARC_POINTS)
+      arc_scaled = [(s(x), s(y)) for x, y in arc]
+      arc_width = max(1, int(3 * scale))
+      draw.line(arc_scaled, fill=ARC_STROKE, width=arc_width, joint="curve")
+
+      # 文字线
+      text_width = max(1, int(2 * scale))
+      for start, end in TEXT_LINES:
+          draw.line([s_tuple(start), s_tuple(end)], fill=TEXT_STROKE, width=text_width)
+
+      return img
+
+
+  def write_svg(output: Path) -> None:
+      output.parent.mkdir(parents=True, exist_ok=True)
+      svg = f"""\u003csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"\u003e
+    \u003crect x="{PAGE_RECT[0]}" y="{PAGE_RECT[1]}" width="{PAGE_RECT[2] - PAGE_RECT[0]}" height="{PAGE_RECT[3] - PAGE_RECT[1]}" rx="{PAGE_RADIUS}" fill="{PAGE_FILL}" stroke="{PAGE_STROKE}" stroke-width="3"/\u003e
+    \u003cpath d="M12 46 Q18 50 24 42 T36 36 T52 28" fill="none" stroke="{ARC_STROKE}" stroke-width="3" stroke-linecap="round"/\u003e
+    \u003cpath d="M12 24h20M12 32h16" stroke="{TEXT_STROKE}" stroke-width="2" stroke-linecap="round"/\u003e
+  \u003c/svg\u003e"""
+      output.write_text(svg, encoding="utf-8")
+
 
   def render_png(size: int, output: Path) -> None:
       output.parent.mkdir(parents=True, exist_ok=True)
-      cairosvg.svg2png(
-          url=str(SVG_PATH),
-          write_to=str(output),
-          output_width=size,
-          output_height=size,
-      )
+      img = draw_icon(size)
+      img.save(output, format="PNG")
 
 
   def create_ico(png_paths: list[Path], output: Path) -> None:
@@ -186,17 +262,19 @@
           sizes = set()
           for _ in range(count):
               entry = f.read(16)
-              width, height = entry[0], entry[1]
+              width = entry[0]
               sizes.add(width if width != 0 else 256)
           assert sizes == expected_sizes, f"ICO sizes {sizes} != {expected_sizes}"
 
 
   def main() -> None:
-      pngs = []
+      # 同步写 SVG 源文件
+      write_svg(ASSETS_DIR / "icon.svg")
+      print(f"Generated {ASSETS_DIR / 'icon.svg'}")
+
       for size in SIZES:
           png_path = ASSETS_DIR / f"icon-{size}.png"
           render_png(size, png_path)
-          pngs.append(png_path)
           print(f"Generated {png_path}")
 
       # 应用图标 ICO（16/32/48/256）
@@ -270,7 +348,7 @@
 
   ```bash
   git add scripts/generate_icons.py tests/scripts/test_generate_icons.py
-  git commit -m "feat(icons): add icon generation script and tests"
+  git commit -m "feat(icons): add Pillow-based icon generation script and tests"
   ```
 
 ---
@@ -479,7 +557,7 @@
   import struct
   for path in ['assets/icon.ico', 'frontend/public/favicon.ico']:
       with open(path, 'rb') as f:
-          _, count, _ = struct.unpack('<HHH', f.read(6))
+          _, _, count = struct.unpack('<HHH', f.read(6))
           sizes = set()
           for _ in range(count):
               entry = f.read(16)
@@ -543,7 +621,7 @@
 
 - [ ] **Step 7: Commit 生成产物（由实现者决定）**
 
-  图标 PNG/ICO 是构建产物，可选是否入仓。建议入仓，以便 clone 后无需安装 cairosvg 即可直接构建 PyInstaller。如入仓：
+  图标 PNG/ICO 是构建产物，可选是否入仓。建议入仓，以便 clone 后无需安装 Pillow 即可直接构建 PyInstaller。如入仓：
 
   ```bash
   git add assets/*.png assets/icon.ico frontend/public/favicon.*
@@ -555,24 +633,24 @@
 ## Self-Review
 
 **Spec coverage：**
-- SVG 源文件 → Task 2。
+- SVG 源文件 → Task 2 / Task 3。
 - PNG 尺寸 16/32/48/256/512/1024 → Task 3。
 - ICO（16/32/48/256）→ Task 3。
 - favicon ICO + PNG → Task 3。
 - PyInstaller 接入 → Task 4。
 - pywebview 窗口图标 → Task 5。
 - 前端 favicon → Task 6。
-- 色彩规范 → Task 2 SVG 与 Task 3 渲染结果共同保证。
+- 色彩规范 → Task 3 几何常量保证。
 
 **Placeholder scan：**
 - 无 TBD/TODO。
 - 所有代码块包含完整代码。
 - 所有命令包含预期输出。
 
-**Type consistency：**
+**Type一致性：**
 - `Path` 对象在 `scripts/generate_icons.py` 中统一使用。
 - `webview.create_window(icon=...)` 接收 `str | None`。
-- `PIL.Image.open` 与 `cairosvg.svg2png` 调用一致。
+- Pillow `ImageDraw` 调用一致。
 
 ## Execution Handoff
 
