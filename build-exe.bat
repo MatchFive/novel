@@ -29,6 +29,7 @@ backend\.venv\Scripts\pyinstaller ^
     --hidden-import aiosqlite ^
     --hidden-import aiosqlite.core ^
     --hidden-import sqlalchemy.dialects.sqlite ^
+    --icon "assets\icon.ico" ^
     backend\desktop_launcher.py
 
 if errorlevel 1 (
