@@ -13,3 +13,4 @@ pywebview==5.2
 websockets==13.0.1
 pytest==8.3.3
 pytest-asyncio==0.24.0
+Pillow==10.4.0
