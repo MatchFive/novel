@@ -24,6 +24,7 @@ from app.logging_config import setup_logging
 BACKEND_HOST = "127.0.0.1"
 BACKEND_PORT = 8765
 APP_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}"
+ICON_PATH = Path(__file__).parent.parent / "assets" / "icon-256.png"
 
 
 def _run_server() -> None:
@@ -82,6 +83,7 @@ def main() -> None:
             width=1280,
             height=800,
             min_size=(960, 640),
+            icon=str(ICON_PATH) if ICON_PATH.exists() else None,
         )
         webview.start(gui="edgechromium")
     except Exception:
