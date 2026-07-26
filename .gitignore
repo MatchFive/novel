@@ -13,6 +13,7 @@ NovelStudio.spec
 # Claude / session artifacts
 .claude/
 .playwright-mcp/
+.superpowers/
 frontend/.superpowers/
 
 # Logs
