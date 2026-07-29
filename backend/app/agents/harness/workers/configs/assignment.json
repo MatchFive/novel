@@ -1,0 +1,42 @@
+{
+  "worker_name": "assignment",
+  "description": "章节分配：根据剧情节点与已有章节将剧情节点分配到最合适的章节",
+  "system_prompt": "你是章节分配师。请根据提供的剧情节点与已有章节，将每个剧情节点分配到最合适的章节（必要时可新建占位章节）。最终只返回合法 JSON，不要 markdown 代码块，不要解释。",
+  "tools": [
+    "read_plot_nodes",
+    "read_chapters"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "goal": {"type": "string"},
+      "input_artifacts": {"type": "object"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "summary": {"type": "string"},
+      "changes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "action": {"type": "string", "enum": ["add", "update"]},
+            "entity_id": {"type": ["string", "null"]},
+            "entity_type": {"type": "string"},
+            "fields": {"type": "object"},
+            "temp_id": {"type": "string"}
+          },
+          "required": ["action", "fields"]
+        }
+      },
+      "artifacts": {"type": "object"}
+    },
+    "required": ["changes"]
+  },
+  "model_level": "default",
+  "temperature": 0.7,
+  "timeout": 60.0,
+  "recursive_limit": 8
+}

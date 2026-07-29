@@ -1,0 +1,48 @@
+{
+  "worker_name": "chapter_text",
+  "description": "章节正文生成：根据细纲、剧情节点、角色、世界观和前文为指定章节生成完整正文",
+  "system_prompt": "你是长篇小说正文作者。请根据提供的目标章节、细纲、剧情节点、角色、世界观、前文尾部、前章摘要链、活跃伏笔和角色记忆生成完整正文。最终只返回合法 JSON，不要 markdown 代码块，不要解释。",
+  "tools": [
+    "read_chapter",
+    "read_chapters",
+    "read_character_memories",
+    "read_outlines",
+    "read_plot_nodes",
+    "read_characters",
+    "read_world",
+    "read_foreshadows"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "goal": {"type": "string"},
+      "input_artifacts": {"type": "object"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "summary": {"type": "string"},
+      "changes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "action": {"type": "string", "enum": ["add", "update"]},
+            "entity_id": {"type": ["string", "null"]},
+            "entity_type": {"type": "string"},
+            "fields": {"type": "object"},
+            "temp_id": {"type": "string"}
+          },
+          "required": ["action", "fields"]
+        }
+      },
+      "artifacts": {"type": "object"}
+    },
+    "required": ["changes"]
+  },
+  "model_level": "high",
+  "temperature": 0.7,
+  "timeout": 120.0,
+  "recursive_limit": 16
+}
