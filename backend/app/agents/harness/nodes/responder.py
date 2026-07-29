@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import json
 
-from app.agents.harness.state import ChangeRecord
+from app.agents.harness.models import HarnessStage
+from app.agents.harness.state import ChangeRecord, HarnessState
 from app.core.errors import AppError
 
 
@@ -112,3 +113,27 @@ async def respond(
         raise
     except Exception:
         return "已生成以下变更建议，请在确认后应用：\n" + listing
+
+
+async def respond_state(state: HarnessState, llm) -> HarnessState:
+    worker_results = [
+        {
+            "worker": r.worker,
+            "stage": r.stage,
+            "changes": r.changes,
+            "notes": r.notes,
+        }
+        for r in state.results.values()
+    ]
+    summary = await respond(
+        llm,
+        state.change_records,
+        user_input=state.user_input,
+        history_context=None,  # history handled separately
+        system_prompt=GLOBAL_RESPONDER_PROMPT if not state.project_id else None,
+        context=state.context.entities if state.project_id else None,
+        worker_results=worker_results,
+    )
+    state.summary = summary
+    state.stage = HarnessStage.COMMIT
+    return state
