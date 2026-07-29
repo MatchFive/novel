@@ -57,8 +57,10 @@ async def commit_state(state: HarnessState, db, is_global: bool) -> HarnessState
                 ))
                 await db.commit()
             except Exception:
-                logger.exception("自动应用审计记录写入失败（变更已应用）")
+                logger.exception("自动应用审计记录写入失败（变更已回滚）")
                 await db.rollback()
+                staged_records.append(r)
+                continue
             auto_applied.append({
                 "change_id": r.id,
                 "entity_id": r.entity_id,

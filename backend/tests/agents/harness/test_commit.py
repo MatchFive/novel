@@ -1,6 +1,8 @@
 """Tests for the harness commit node."""
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from app.agents.harness.models import HarnessStage, WorkerResult
@@ -250,3 +252,39 @@ async def test_commit_auto_applies_multiple_chapter_fields():
         assert chapter["content"] == "new content"
         assert chapter["detailed_outline"] == "new outline"
         assert chapter["status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_commit_audit_failure_downgrades_to_staged():
+    async with AsyncSessionLocal() as db:
+        pid = await _make_project(db)
+        chid = await _make_chapter(db, pid)
+
+        records = [
+            ChangeRecord(
+                id="cr_audit",
+                project_id=pid,
+                action="update",
+                entity_type="chapter",
+                entity_id=chid,
+                after={"content": "audit test content"},
+                stage="chapter_text",
+            ),
+        ]
+        state = _make_state(pid, records)
+
+        original_commit = db.commit
+        db.commit = AsyncMock(side_effect=Exception("audit commit failed"))
+        try:
+            new_state = await commit_state(state, db, is_global=False)
+        finally:
+            db.commit = original_commit
+
+        assert new_state.stage == HarnessStage.DONE
+        assert len(new_state.auto_applied) == 0
+        assert len(new_state.staged_records) == 1
+        assert new_state.staged_records[0].id == "cr_audit"
+
+        # The chapter update must have been rolled back
+        chapter = await repo.get_chapter(db, chid)
+        assert chapter["content"] == "original content"
