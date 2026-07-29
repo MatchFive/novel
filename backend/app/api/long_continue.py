@@ -30,8 +30,8 @@ async def assemble_context(db: AsyncSession, project_id: str) -> str:
 
     last_chapter = sorted(chapters, key=lambda c: c.get('order', 0))[-1] if chapters else None
     if last_chapter:
-        from app.agents.harness.workers.chapter_workers import _volume_outline_text
-        volume_outline = _volume_outline_text(outlines, last_chapter.get('order', 0))
+        from app.agents.harness.workers._chapter_utils import volume_outline_text
+        volume_outline = volume_outline_text(outlines, last_chapter.get('order', 0))
         lines.append("\n【当前卷大纲】")
         lines.append(volume_outline)
 

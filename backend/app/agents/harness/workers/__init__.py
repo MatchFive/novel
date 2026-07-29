@@ -8,13 +8,11 @@ from app.agents.harness.workers.outline_worker import OutlineWorker
 from app.agents.harness.workers.plot_worker import PlotWorker
 from app.agents.harness.workers.world_worker import WorldWorker
 
-from .chapter_workers import (
-    AssignmentWorker,
-    BroadOutlineWorker,
-    ChapterOutlineWorker,
-    ChapterTextWorker,
-    PlotNodesWorker,
-)
+from app.agents.harness.workers.assignment_worker import AssignmentWorker
+from app.agents.harness.workers.broad_outline_worker import BroadOutlineWorker
+from app.agents.harness.workers.chapter_outline_worker import ChapterOutlineWorker
+from app.agents.harness.workers.chapter_text_worker import ChapterTextWorker
+from app.agents.harness.workers.plot_nodes_worker import PlotNodesWorker
 
 __all__ = [
     "WorkerBase",
