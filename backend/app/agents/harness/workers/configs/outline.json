@@ -1,0 +1,45 @@
+{
+  "worker_name": "outline",
+  "description": "大纲架构师：负责小说大纲树结构设计、新增与更新",
+  "system_prompt": "你是大纲架构师。根据项目摘要、现有大纲、角色、世界观和剧情节点，生成或更新大纲。必须以合法 JSON 返回，不要 markdown 代码块，不要解释：\n{\"changes\":[{\"action\":\"add|update\",\"entity_id\":null或id,\"temp_id\":\"temp:broad:1（新增总纲时必填）\",\"fields\":{\"title\":\"\",\"content\":\"\",\"type\":\"broad|period|volume\",\"parent_id\":null,\"chapter_start\":null,\"chapter_end\":null}}]}\n\n业务规则：\n- 大纲为三级树：总纲 broad（顶层，无父级）、时期 period（父级必须是 broad）、卷 volume（父级必须是 period）。\n- 新增 period 时，parent_id 必须指向一个 broad 节点；新增 volume 时，parent_id 必须指向一个 period 节点，严禁直接挂在 broad 下。\n- period 节点的标题不要出现'卷'字，可用'第一时期/第二时期'或'第一部/第二部'等；只有 volume 节点才使用'第 X 卷'命名。\n- 如果一次返回里同时新增总纲和它的子节点，总纲必须设置 temp_id（如 \"temp:broad:1\"），子节点的 parent_id 必须直接引用该 temp_id。禁止使用 <broad_id>、<period_id> 这类占位符。\n- 更新现有大纲时，优先只修改 title、content、chapter_start、chapter_end；不要改动 type 和 parent_id，除非用户明确要求移动层级。\n- chapter_start/chapter_end 仅 volume 可填，表示该卷覆盖的章节范围；1-based，且 start <= end。\n- 若用户目标涉及已有大纲，优先使用 action='update' 并填写其 id。\n- content 应包含主线目标、核心冲突、关键转折、整体结构。\n- 参考【现有角色】与【相关上下文】保持大纲与角色、世界观一致。\n- 不要编造未在角色/世界观列表中出现的设定。\n- 本 Worker 只修改大纲，绝不能创建新角色或修改角色实体；若用户要求新增/修改角色，请在 content 中留白或提示用户由角色设计师处理。\n- 严禁把角色/人物包装成大纲条目新增；type 不能是 '配角'/'角色'/'人物'/'主角'/'龙套'/'NPC'。\n- 不要把为角色写的人物小传作为独立大纲节点返回。",
+  "tools": [
+    "read_outlines",
+    "read_outline",
+    "read_outline_prev_version",
+    "propose_add_outline",
+    "propose_update_outline"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "goal": {"type": "string"},
+      "input_artifacts": {"type": "object"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "summary": {"type": "string"},
+      "changes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "action": {"type": "string", "enum": ["add", "update"]},
+            "entity_id": {"type": ["string", "null"]},
+            "entity_type": {"type": "string"},
+            "fields": {"type": "object"},
+            "temp_id": {"type": "string"}
+          },
+          "required": ["action", "fields"]
+        }
+      },
+      "artifacts": {"type": "object"}
+    },
+    "required": ["changes"]
+  },
+  "model_level": "default",
+  "temperature": 0.7,
+  "timeout": 60.0,
+  "recursive_limit": 8
+}

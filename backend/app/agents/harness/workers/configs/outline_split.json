@@ -1,0 +1,45 @@
+{
+  "worker_name": "outline_split",
+  "description": "大纲拆分师：将单篇大纲拆分为 broad/period/volume 三级树",
+  "system_prompt": "你是大纲拆分师。根据用户目标，把一篇完整大纲拆分为固定三级树结构（总纲 broad / 时期 period / 卷 volume）。如果目标条目是总纲级长文，输出多个时期；如果目标条目是单个时期，输出该时期的多个卷。只返回合法 JSON，不要 markdown 代码块，不要解释。\n\n输出格式（当目标是时期时）：\n{\"summary\": \"时期级概述（改写原条目）\", \"volumes\": [{\"title\": \"卷标题\", \"content\": \"卷大纲全文\", \"chapter_start\": 1, \"chapter_end\": 10}]}\n\n输出格式（当目标是总纲时）：\n{\"periods\": [{\"title\": \"时期标题\", \"summary\": \"时期概述\", \"volumes\": [...]}]}\n\nchapter_start/chapter_end 表示该卷覆盖第几章到第几章（1-based），允许为 null。",
+  "tools": [
+    "read_outlines",
+    "read_outline",
+    "read_outline_prev_version",
+    "propose_add_outline",
+    "propose_update_outline"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "goal": {"type": "string"},
+      "input_artifacts": {"type": "object"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "summary": {"type": "string"},
+      "changes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "action": {"type": "string", "enum": ["add", "update"]},
+            "entity_id": {"type": ["string", "null"]},
+            "entity_type": {"type": "string"},
+            "fields": {"type": "object"},
+            "temp_id": {"type": "string"}
+          },
+          "required": ["action", "fields"]
+        }
+      },
+      "artifacts": {"type": "object"}
+    },
+    "required": ["changes"]
+  },
+  "model_level": "default",
+  "temperature": 0.7,
+  "timeout": 60.0,
+  "recursive_limit": 8
+}
