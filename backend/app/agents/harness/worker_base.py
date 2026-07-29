@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -254,5 +255,20 @@ async def run_worker(
     metadata: WorkerMetadata | None = None,
     history_context: list[dict] | None = None,
 ) -> dict:
+    if metadata is None:
+        metadata = _load_worker_metadata(worker_cls)
     worker = worker_cls(db, llm, recursive_limit, metadata=metadata)
     return await worker.run(task, context, history_context=history_context)
+
+
+def _load_worker_metadata(worker_cls: type["WorkerBase"]) -> WorkerMetadata:
+    """Load WorkerMetadata from the worker's JSON config file.
+
+    Config files live at app/agents/harness/workers/configs/<worker_name>.json.
+    """
+    worker_name = worker_cls.worker_name
+    config_path = Path(__file__).parent / "workers" / "configs" / f"{worker_name}.json"
+    if not config_path.exists():
+        raise RuntimeError(f"No metadata config found for worker '{worker_name}' at {config_path}")
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    return WorkerMetadata(**raw)

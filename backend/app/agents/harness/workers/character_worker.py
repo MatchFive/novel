@@ -12,7 +12,6 @@ from app.agents.harness.workers._compat import (
     task_goal,
 )
 from app.core.errors import AppError
-from app.core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
