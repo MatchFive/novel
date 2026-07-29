@@ -2,17 +2,28 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from app.agents.harness.context_builder import build_entities_from_context
+from app.agents.harness.models import HarnessContext, Task, WorkerMetadata
 from app.agents.harness.workers import CharacterWorker
+
+
+def _character_metadata() -> WorkerMetadata:
+    config_path = Path(__file__).parent.parent / "app" / "agents" / "harness" / "workers" / "configs" / "character.json"
+    return WorkerMetadata(**json.loads(config_path.read_text(encoding="utf-8")))
 
 
 @pytest.fixture(scope="module")
 def anyio_backend():
     return "asyncio"
+
+
+def _task(goal: str) -> Task:
+    return Task(id="t1", worker="character", goal=goal)
 
 
 @pytest.mark.anyio
@@ -25,8 +36,8 @@ async def test_worker_tool_loop_uses_user_role_for_tool_results():
     ]
 
     with patch("app.agents.harness.worker_base.call_tool", new=AsyncMock(return_value=[{"id": "c1"}])):
-        worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=5)
-        await worker.run("设计一个主角", {})
+        worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=5, metadata=_character_metadata())
+        await worker.run(_task("设计一个主角"), HarnessContext())
 
     assert llm.chat.call_count >= 2
 
@@ -53,8 +64,8 @@ async def test_worker_parses_final_json_into_changes():
     })
 
     with patch("app.agents.harness.worker_base.call_tool", new=AsyncMock()):
-        worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=5)
-        result = await worker.run("设计一个主角", {})
+        worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=5, metadata=_character_metadata())
+        result = await worker.run(_task("设计一个主角"), HarnessContext())
 
     assert result.get("changes") == [
         {
@@ -73,9 +84,9 @@ async def test_worker_prompt_includes_existing_characters_and_update_rule():
     llm = AsyncMock()
     llm.chat.return_value = json.dumps({"changes": []})
 
-    worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=1)
-    context = {"characters": [{"id": "c1", "name": "刘修", "traits": "穿越者"}]}
-    await worker.run("完善刘修的设定", context)
+    worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=1, metadata=_character_metadata())
+    context = HarnessContext(entities={"characters": [{"id": "c1", "name": "刘修", "traits": "穿越者"}]})
+    await worker.run(_task("完善刘修的设定"), context)
 
     first_call = llm.chat.call_args_list[0]
     messages = first_call.kwargs.get("messages") or first_call.args[0]
@@ -94,13 +105,16 @@ async def test_worker_uses_context_builder_when_project_id_present():
     llm = AsyncMock()
     llm.chat.return_value = json.dumps({"changes": []})
 
-    worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=1)
-    with patch("app.agents.harness.workers.ContextBuilder") as MockBuilder:
+    worker = CharacterWorker(db=AsyncMock(), llm=llm, recursive_limit=1, metadata=_character_metadata())
+    with patch("app.agents.harness.workers.character_worker.ContextBuilder") as MockBuilder:
         MockBuilder.return_value.build = AsyncMock(
             return_value="## 相关角色\n- [c2]\n  name: 刘修\n  traits: 穿越者"
         )
-        context = {"project_id": "p1", "characters": [{"id": "c1", "name": "刘修"}]}
-        await worker.run("完善刘修的设定", context)
+        context = HarnessContext(
+            project_id="p1",
+            entities={"characters": [{"id": "c1", "name": "刘修"}]},
+        )
+        await worker.run(_task("完善刘修的设定"), context)
 
     first_call = llm.chat.call_args_list[0]
     messages = first_call.kwargs.get("messages") or first_call.args[0]
@@ -111,7 +125,7 @@ async def test_worker_uses_context_builder_when_project_id_present():
     MockBuilder.assert_called_once()
     _, kwargs = MockBuilder.call_args
     # WIP：entities 经 build_entities_from_context 归一化为单数键
-    assert kwargs.get("entities") == build_entities_from_context(context)
+    assert kwargs.get("entities") == build_entities_from_context(context.entities)
     MockBuilder.return_value.build.assert_awaited_once_with(
         "完善刘修的设定",
         focus_entity_type="character",

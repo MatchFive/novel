@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock
 
-from app import repositories as repo
+from app.agents.harness.models import HarnessContext, Task
 from app.agents.harness.nodes.aggregator import aggregate
 from app.agents.harness.state import ChangeRecord, make_change
 from app.agents.harness.workers import OutlineSplitWorker
@@ -27,6 +27,10 @@ def fake_db():
     return AsyncMock()
 
 
+def _task(goal: str) -> Task:
+    return Task(id="t1", worker="outline_split", goal=goal)
+
+
 @pytest.mark.anyio
 async def test_outline_split_worker_broad_target(fake_db, fake_llm, monkeypatch):
     target = {
@@ -40,7 +44,7 @@ async def test_outline_split_worker_broad_target(fake_db, fake_llm, monkeypatch)
         return [target]
 
     monkeypatch.setattr(
-        "app.agents.harness.workers.repo.list_outlines", _list_outlines
+        "app.agents.harness.workers.outline_split_worker.repo.list_outlines", _list_outlines
     )
 
     response = {
@@ -60,7 +64,8 @@ async def test_outline_split_worker_broad_target(fake_db, fake_llm, monkeypatch)
         ]
     }
     worker = OutlineSplitWorker(fake_db, fake_llm(response), 5)
-    result = await worker.run("拆成几卷", {"project_id": "p1", "entity_id": "broad-1"})
+    context = HarnessContext(project_id="p1", session_context={"entity_id": "broad-1"})
+    result = await worker.run(_task("拆成几卷"), context)
 
     assert result.get("stage") == "outline_split"
     changes = result.get("changes", [])
@@ -93,7 +98,7 @@ async def test_outline_split_worker_period_target(fake_db, fake_llm, monkeypatch
         return [target]
 
     monkeypatch.setattr(
-        "app.agents.harness.workers.repo.list_outlines", _list_outlines
+        "app.agents.harness.workers.outline_split_worker.repo.list_outlines", _list_outlines
     )
 
     response = {
@@ -108,9 +113,8 @@ async def test_outline_split_worker_period_target(fake_db, fake_llm, monkeypatch
         ],
     }
     worker = OutlineSplitWorker(fake_db, fake_llm(response), 5)
-    result = await worker.run(
-        "把这个时期拆成几卷", {"project_id": "p1", "entity_id": "period-1"}
-    )
+    context = HarnessContext(project_id="p1", session_context={"entity_id": "period-1"})
+    result = await worker.run(_task("把这个时期拆成几卷"), context)
 
     assert result.get("stage") == "outline_split"
     changes = result.get("changes", [])
@@ -133,10 +137,10 @@ async def test_outline_split_worker_period_target(fake_db, fake_llm, monkeypatch
 @pytest.mark.anyio
 async def test_outline_split_worker_missing_context(fake_db, fake_llm):
     worker = OutlineSplitWorker(fake_db, fake_llm({}), 5)
-    result = await worker.run("拆成几卷", {"project_id": "p1"})
+    result = await worker.run(_task("拆成几卷"), HarnessContext(project_id="p1"))
     assert result.get("error") == "缺少 project_id 或 entity_id"
 
-    result = await worker.run("拆成几卷", {"entity_id": "e1"})
+    result = await worker.run(_task("拆成几卷"), HarnessContext(session_context={"entity_id": "e1"}))
     assert result.get("error") == "缺少 project_id 或 entity_id"
 
 
@@ -146,10 +150,11 @@ async def test_outline_split_worker_target_not_found(fake_db, fake_llm, monkeypa
         return []
 
     monkeypatch.setattr(
-        "app.agents.harness.workers.repo.list_outlines", _list_outlines
+        "app.agents.harness.workers.outline_split_worker.repo.list_outlines", _list_outlines
     )
     worker = OutlineSplitWorker(fake_db, fake_llm({}), 5)
-    result = await worker.run("拆成几卷", {"project_id": "p1", "entity_id": "missing"})
+    context = HarnessContext(project_id="p1", session_context={"entity_id": "missing"})
+    result = await worker.run(_task("拆成几卷"), context)
     assert result.get("error") == "目标大纲不存在"
 
 
@@ -161,10 +166,11 @@ async def test_outline_split_worker_invalid_llm_response(fake_db, fake_llm, monk
         return [target]
 
     monkeypatch.setattr(
-        "app.agents.harness.workers.repo.list_outlines", _list_outlines
+        "app.agents.harness.workers.outline_split_worker.repo.list_outlines", _list_outlines
     )
     worker = OutlineSplitWorker(fake_db, fake_llm("not a dict"), 5)
-    result = await worker.run("拆成几卷", {"project_id": "p1", "entity_id": "broad-1"})
+    context = HarnessContext(project_id="p1", session_context={"entity_id": "broad-1"})
+    result = await worker.run(_task("拆成几卷"), context)
     assert result.get("error") == "无法解析拆分结果"
 
 
@@ -178,7 +184,7 @@ async def test_outline_split_worker_legacy_root_under_broad(fake_db, fake_llm, m
         return [broad_root, legacy]
 
     monkeypatch.setattr(
-        "app.agents.harness.workers.repo.list_outlines", _list_outlines
+        "app.agents.harness.workers.outline_split_worker.repo.list_outlines", _list_outlines
     )
 
     response = {
@@ -188,7 +194,8 @@ async def test_outline_split_worker_legacy_root_under_broad(fake_db, fake_llm, m
         ],
     }
     worker = OutlineSplitWorker(fake_db, fake_llm(response), 5)
-    result = await worker.run("拆成几卷", {"project_id": "p1", "entity_id": "legacy-1"})
+    context = HarnessContext(project_id="p1", session_context={"entity_id": "legacy-1"})
+    result = await worker.run(_task("拆成几卷"), context)
 
     changes = result.get("changes", [])
     assert len(changes) == 2
