@@ -7,22 +7,37 @@ from app import repositories as repo
 from app.agents.harness.context_builder import ContextBuilder, build_entities_from_context
 from app.agents.harness.prompts.chapter_generation import broad_outline_prompt
 from app.agents.harness.worker_base import WorkerBase
+from app.agents.harness.workers._chapter_utils import user_prompt
 from app.agents.harness.workers._compat import (
     context_entity_list,
     context_project_id,
-    context_project_summary,
     task_goal,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _user_prompt(goal: str, related: str = "") -> str:
-    parts = []
-    if related:
-        parts.append(f"【相关上下文】\n{related}")
-    parts.append(f"【用户目标】\n{goal}")
-    return "\n\n".join(parts)
+def _project_summary(context) -> str:
+    """Return project_summary, falling back to the project entity title/description."""
+    if hasattr(context, "project_summary"):
+        summary = context.project_summary
+    elif isinstance(context, dict):
+        summary = context.get("project_summary")
+    else:
+        summary = None
+    if summary:
+        return summary
+
+    if hasattr(context, "entities"):
+        project = (context.entities or {}).get("project") or {}
+    elif isinstance(context, dict):
+        project = context.get("project") or {}
+    else:
+        project = {}
+
+    return (
+        f"{project.get('title', '未命名项目')}\n{project.get('description', '')}"
+    ).strip() or "未提供项目摘要"
 
 
 class BroadOutlineWorker(WorkerBase):
@@ -45,17 +60,17 @@ class BroadOutlineWorker(WorkerBase):
             logger.exception("ContextBuilder failed for broad_outline")
 
         prompt_context = {
-            "project_summary": context_project_summary(context) or "未提供项目摘要",
+            "project_summary": _project_summary(context),
             "existing_outlines": existing_outlines,
             "characters": context_entity_list(context, "characters"),
             "world": context_entity_list(context, "world"),
             "plot_nodes": context_entity_list(context, "plot"),
         }
         system = broad_outline_prompt(prompt_context)
-        user_prompt = _user_prompt(goal, related)
+        user_prompt_text = user_prompt(goal, related)
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": user_prompt_text},
         ]
         if history_context:
             messages = history_context + messages
