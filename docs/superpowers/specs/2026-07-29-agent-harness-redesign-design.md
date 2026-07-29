@@ -335,31 +335,210 @@ class HarnessRuntime:
 6. 重写 `assistant.py` 主流程，接入 runtime。
 7. 跑 smoke test：`/health`、`/assistant/chat` 基本对话、confirm/reject 流程。
 
-## 9. 后续阶段（简述）
+## 9. 后续阶段详细规划
 
-### Phase 2：网文知识与 Skills
+### 9.1 Phase 2：网文知识与 Skills
 
-- 新增 `backend/app/agents/skills/` 目录与 `SkillManager`。
-- 参考 wangwenclub 创作指南，沉淀为可复用 skill / RAG chunk。
-- Worker JSON 支持 `"skills": ["plot_design", "character_arc"]`，运行时把 skill 文本注入 system prompt。
+目标：把网文创作方法论系统化，以 skill / RAG 形式注入 worker prompt，提升 agent 创作能力。
 
-### Phase 3：固定 Workflow 剥离
+#### 9.1.1 Skill 体系
 
-- 把 `backend/app/api/long_memory.py` 的 extract-confirm-apply 流程改造成显式 workflow endpoint。
-- 把 chapter generation 中固定分段、review、rating 流程剥离成 workflow。
-- Harness 只负责需要 LLM 开放推理的复杂任务。
+新增目录：
 
-### Phase 4：经验总结闭环
+```
+backend/app/agents/skills/
+├── __init__.py
+├── skill_manager.py
+├── registry/
+│   ├── plot_design.md
+│   ├── character_arc.md
+│   ├── world_building.md
+│   ├── foreshadowing.md
+│   ├── pacing.md
+│   ├── dialogue.md
+│   └── hook_opening.md
+└── rag/
+    ├── chunks/
+    └── index.py
+```
 
-- 在 `/confirm` 和 `/reject` 后增加 reflection node。
-- 区分“直接接受”与“先拒绝再调整后接受”两种模式，后者重点总结。
-- 生成项目级 `ProjectExperience` 记录，影响后续 supervisor 和 worker prompt。
+两种 skill 形态：
 
-## 10. 未解决问题（第一阶段不处理）
+| 形态 | 用途 | 存储 |
+|---|---|---|
+| **Inline Skill** | 短规则、模板、checklist，直接拼入 system prompt | Markdown 文件 |
+| **RAG Chunk** | 长文指南、案例分析，按需检索后注入 | Markdown + 向量索引 |
 
-- Skill / RAG 的具体 schema 和存储方式（Phase 2 再定）。
-- 固定 workflow 的 UI 按钮与后端 API 细节（Phase 3 再定）。
-- 经验总结的存储格式、检索方式、注入策略（Phase 4 再定）。
+#### 9.1.2 Skill Schema
+
+```json
+{
+  "skill_name": "plot_design",
+  "description": "网络小说情节设计方法论",
+  "type": "inline",
+  "triggers": ["outline", "plot", "foreshadow"],
+  "content_file": "registry/plot_design.md",
+  "priority": 1
+}
+```
+
+```json
+{
+  "skill_name": "wangwenclub_case",
+  "description": "网文俱乐部创作案例库",
+  "type": "rag",
+  "source_url": "https://www.wangwenclub.com/handbook/category/%E5%88%9B%E4%BD%9C%E6%8C%87%E5%8D%97",
+  "chunks_dir": "rag/chunks/wangwenclub/",
+  "index_file": "rag/index/wangwenclub.json",
+  "embedding_model": "...",
+  "top_k": 3
+}
+```
+
+#### 9.1.3 SkillManager 职责
+
+- 加载所有 skill 配置。
+- 根据 worker 名称或任务目标返回应注入的 skill 文本列表。
+- 对 RAG skill：接收用户输入或任务目标，检索 top-k chunk，拼接后返回。
+- 提供 `list_skills()` 供 supervisor 选择（未来可让 supervisor 主动决定调用哪些 skill）。
+
+#### 9.1.4 Worker JSON 集成
+
+Worker JSON 增加 `skills` 字段：
+
+```json
+{
+  "worker_name": "outline",
+  "skills": ["plot_design", "pacing"],
+  "rag_skills": ["wangwenclub_case"]
+}
+```
+
+`WorkerBase` 在构造 system prompt 时：
+
+1. 读取 `skills` 对应的 inline skill 文本。
+2. 若配置了 `rag_skills`，用 task.goal 做 query 检索 chunk。
+3. 把所有文本按优先级排序，拼到 system prompt 末尾。
+
+#### 9.1.5 参考 wangwenclub 的处理方式
+
+- 初期允许手动把指南内容整理成 Markdown 放入 `registry/` 和 `rag/chunks/`。
+- 未来可扩展一个抓取/同步工具，但第一阶段不实现自动抓取。
+- 每个 chunk 要有明确标签（如 `category=情节设计`, `topic=伏笔回收`），方便按 worker 类型过滤。
+
+### 9.2 Phase 3：固定 Workflow 剥离
+
+目标：把“前端按钮 + 后端固定流程”的任务从 harness 中剥离，减少 harness 负担，提升可预测性。
+
+#### 9.2.1 哪些流程应该剥离
+
+| 流程 | 当前位置 | 剥离后 |
+|---|---|---|
+| **角色记忆更新** | `api/long_memory.py` | 已是独立 workflow，保留并可能改名为 `workflow/memory_update` |
+| **章节生成**（多段生成 + review + rating） | `workers/chapter_workers.py` 内 | 独立为 `workflow/chapter_generation` |
+| **世界观一致性检查** | 当前无 | 未来新增 `workflow/world_consistency_check` |
+| **伏笔回收检查** | 当前无 | 未来新增 `workflow/foreshadow_audit` |
+
+#### 9.2.2 Workflow 统一抽象
+
+新增 `backend/app/agents/workflows/`：
+
+```python
+class WorkflowDefinition(BaseModel):
+    name: str
+    description: str
+    steps: list[WorkflowStep]
+    input_schema: dict
+    output_schema: dict
+
+class WorkflowStep(BaseModel):
+    name: str
+    fn: str          # 对应一个 Python 函数
+    depends_on: list[str] = []
+    condition: str | None = None   # 可选条件执行
+```
+
+每个 workflow 是一个固定的有向图，不由 LLM 动态规划，但可以包含 LLM 调用节点。
+
+#### 9.2.3 前端按钮
+
+在 LongWorkspace 中增加“工具箱”或“快捷操作”区域：
+
+- “提取本章记忆” → 调用 `/api/workflow/chapter/:id/extract-memory`
+- “生成下一章” → 调用 `/api/workflow/project/:id/generate-chapter`
+- “检查伏笔” → 调用 `/api/workflow/project/:id/audit-foreshadows`
+
+这些操作有明确入口，不需要通过 `/assistant/chat` 触发。
+
+#### 9.2.4 与 Harness 的关系
+
+- Workflow 内部可以调用 worker/harness 的能力，但 workflow 本身是编排层。
+- Harness 只处理用户自然语言输入的开放推理任务。
+- 某些 workflow 的结果（如生成的章节）仍可能进入 `staged_changes` 等待确认。
+
+### 9.3 Phase 4：经验总结闭环
+
+目标：从用户的 confirm/reject/accept-after-adjust 行为中学习，沉淀项目级经验，优化后续 agent 行为。
+
+#### 9.3.1 触发时机
+
+| 用户行为 | 总结重点 |
+|---|---|
+| 直接 confirm | 记录成功模式：用户偏好、变更类型、上下文 |
+| reject | 记录失败原因：方向错误、理解偏差、质量不达标 |
+| reject 后调整再 confirm | **重点总结**：最初为什么错、调整后为什么对、规则提炼 |
+
+#### 9.3.2 数据模型
+
+新增 `ProjectExperience`（存储在 SQLite，可选 Neo4j）：
+
+```python
+class ProjectExperience(BaseModel):
+    id: str
+    project_id: str
+    trigger_turn_id: str          # 关联哪一次对话
+    experience_type: str          # "success" | "failure" | "adjustment"
+    original_input: str
+    original_plan: dict
+    final_change_records: list[ChangeRecord]
+    reflection_text: str          # LLM 生成的经验总结
+    rules: list[str]              # 提炼出的规则/约束
+    embedding: list[float] | None
+    created_at: datetime
+```
+
+#### 9.3.3 Reflection Node
+
+新增 `nodes/reflection.py`：
+
+- 输入：user_input、原始 plan、worker_results、最终变更记录、用户反馈（confirm/reject/adjust）。
+- 调用 LLM 生成 `reflection_text` 和 `rules`。
+- 对 adjust 场景，重点分析 diff：用户改了什么、为什么改。
+
+#### 9.3.4 经验注入策略
+
+- 每次 `/assistant/chat` 的 analyze 阶段，用 user_input 向量检索 `ProjectExperience`，取 top-k 条。
+- 把相关经验拼入 supervisor 和 worker 的 system prompt（如“注意：该项目历史上用户倾向于……”）。
+- 避免过度拟合：设置相似度阈值和最大注入条数。
+
+#### 9.3.5 与 Skill 的区别
+
+| | Skill | ProjectExperience |
+|---|---|---|
+| 来源 | 通用网文知识 | 该项目历史交互 |
+| 更新频率 | 手动维护 | 自动沉淀 |
+| 作用范围 | 特定 worker | 全局 supervisor + worker |
+| 形态 | Markdown / RAG chunk | 结构化记录 + 向量检索 |
+
+## 10. 未解决问题（第一阶段不实现，但已在 Phase 2/3/4 规划）
+
+以下功能已在第 9 节给出架构规划，第一阶段不编写实现代码：
+
+- Skill / RAG 的向量索引构建脚本与抓取工具（Phase 2 实现）。
+- Workflow 的前端 UI 按钮与具体 API 路由（Phase 3 实现）。
+- `ProjectExperience` 数据表迁移与 reflection node（Phase 4 实现）。
+
+第一阶段完成后，这些规划将直接作为后续实现计划的输入。
 
 ## 11. 验收标准
 
