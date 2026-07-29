@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from app.agents.harness.dag_executor import DagExecutor
-from app.agents.harness.models import HarnessStage, HarnessState
+from app.agents.harness.models import HarnessStage
+from app.agents.harness.state import HarnessState
 from app.agents.harness.worker_manager import WorkerManager
 
 
