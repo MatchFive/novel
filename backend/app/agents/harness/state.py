@@ -19,15 +19,28 @@ class ChangeRecord(BaseModel):
     stage: str = ""
 
 
+from app.agents.harness.models import (
+    ExecutionPlan,
+    HarnessContext,
+    HarnessError,
+    HarnessStage,
+    WorkerResult,
+)
+
+
 class HarnessState(BaseModel):
-    project_id: str
+    project_id: str | None = None
+    session_id: str = ""
     user_input: str = ""
-    context: dict = Field(default_factory=dict)        # 前置取数结果
-    execution_plan: dict = Field(default_factory=dict) # supervisor 输出
-    worker_results: list = Field(default_factory=list)
+    stage: HarnessStage = HarnessStage.INIT
+    context: HarnessContext = Field(default_factory=HarnessContext)
+    plan: ExecutionPlan | None = None
+    results: dict[str, WorkerResult] = Field(default_factory=dict)
     change_records: list[ChangeRecord] = Field(default_factory=list)
+    staged_records: list[ChangeRecord] = Field(default_factory=list)
     summary: str = ""
-    stage: str = "init"  # init | analyze | dispatch | collect | aggregate | respond
+    error: HarnessError | None = None
+    auto_applied: list[dict] = Field(default_factory=list)
 
     def add_change(self, cr: ChangeRecord) -> None:
         self.change_records.append(cr)
