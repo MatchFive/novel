@@ -68,18 +68,12 @@ def _aggregate_results(project_id: str, results: dict[str, WorkerResult]) -> lis
 
 def aggregate(project_id: str, worker_results: list[dict]) -> list[ChangeRecord]:
     """Legacy aggregator interface for callers still passing list[dict]."""
-    mapped = {}
+    mapped: dict[str, WorkerResult] = {}
     for i, res in enumerate(worker_results):
         worker = res.get("worker", "unknown")
-        mapped[str(i)] = WorkerResult(
+        mapped[str(i)] = WorkerResult.from_raw(
             worker=worker,
             task_id=str(i),
-            status="error" if res.get("error") else "completed",
-            summary=res.get("summary", ""),
-            changes=res.get("changes") or [],
-            artifacts=res.get("artifacts", {}),
-            notes=res.get("notes", []),
-            error=res.get("error"),
-            stage=res.get("stage", worker),
+            raw=res,
         )
     return _aggregate_results(project_id, mapped)
