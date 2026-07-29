@@ -4,14 +4,15 @@ from __future__ import annotations
 import logging
 import uuid
 
-from app.agents.harness.models import ExecutionPlan, HarnessStage, HarnessState, Task
+from app.agents.harness.models import ExecutionPlan, HarnessStage, Task, WorkerMetadata
+from app.agents.harness.state import HarnessState
 from app.agents.harness.worker_manager import WorkerManager
 from app.core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
 
 
-def _build_supervisor_prompt(worker_metadata: list, context_note: str = "") -> str:
+def _build_supervisor_prompt(worker_metadata: list[WorkerMetadata], context_note: str = "") -> str:
     worker_descriptions = []
     for meta in worker_metadata:
         worker_descriptions.append(
