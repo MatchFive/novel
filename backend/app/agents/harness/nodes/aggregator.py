@@ -1,13 +1,13 @@
-"""aggregator：Worker 结果 -> ChangeRecord[]（稳定 id + 实体类型 + before/after）。"""
+"""Aggregator node: WorkerResult -> ChangeRecord[]."""
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from app.agents.harness.state import ChangeRecord, make_change
+from app.agents.harness.models import HarnessStage, WorkerResult
+from app.agents.harness.state import ChangeRecord, HarnessState, make_change
 
 
-# 实体类型映射（worker 产出 -> 数据表实体）
 _WORKER_ENTITY = {
     "character": "character",
     "world": "world",
@@ -19,22 +19,31 @@ _WORKER_ENTITY = {
     "foreshadow": "foreshadow",
     "chapter_outline": "chapter",
     "chapter_text": "chapter",
+    "assignment": "chapter",
 }
 
 
-def aggregate(project_id: str, worker_results: list[dict]) -> list[ChangeRecord]:
+def aggregate_state(state: HarnessState) -> HarnessState:
+    state.change_records = _aggregate_results(state.project_id or "", state.results)
+    state.stage = HarnessStage.RESPOND
+    return state
+
+
+def _aggregate_results(project_id: str, results: dict[str, WorkerResult]) -> list[ChangeRecord]:
     records: list[ChangeRecord] = []
-    for res in worker_results:
-        worker = res.get("worker")
+    for task_id, res in results.items():
+        worker = res.worker
         default_entity_type = _WORKER_ENTITY.get(worker, worker or "unknown")
-        changes = res.get("changes") or []
-        stage = res.get("stage", "")
+        changes = res.changes
+        stage = res.stage or worker
         if isinstance(changes, str):
             try:
                 changes = json.loads(changes)
             except Exception:
                 changes = []
         for ch in changes:
+            if not isinstance(ch, dict):
+                continue
             action = ch.get("action", "add")
             fields = ch.get("fields", {})
             entity_id = ch.get("entity_id")
@@ -55,3 +64,22 @@ def aggregate(project_id: str, worker_results: list[dict]) -> list[ChangeRecord]
                 temp_id=ch.get("temp_id"),
             ))
     return records
+
+
+def aggregate(project_id: str, worker_results: list[dict]) -> list[ChangeRecord]:
+    """Legacy aggregator interface for callers still passing list[dict]."""
+    mapped = {}
+    for i, res in enumerate(worker_results):
+        worker = res.get("worker", "unknown")
+        mapped[str(i)] = WorkerResult(
+            worker=worker,
+            task_id=str(i),
+            status="error" if res.get("error") else "completed",
+            summary=res.get("summary", ""),
+            changes=res.get("changes") or [],
+            artifacts=res.get("artifacts", {}),
+            notes=res.get("notes", []),
+            error=res.get("error"),
+            stage=res.get("stage", worker),
+        )
+    return _aggregate_results(project_id, mapped)
