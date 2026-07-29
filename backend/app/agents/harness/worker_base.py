@@ -3,12 +3,14 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.harness.models import WorkerMetadata
 from app.agents.tools import call_tool, tool_schemas
 from app.config import settings as app_settings
 from app.core.errors import AppError
@@ -18,12 +20,83 @@ logger = logging.getLogger(__name__)
 
 class WorkerBase:
     worker_name: str = "base"
+    metadata: WorkerMetadata | None = None
 
-    def __init__(self, db: AsyncSession, llm, recursive_limit: int, timeout: float = 60.0):
+    def __init__(
+        self,
+        db: AsyncSession,
+        llm,
+        recursive_limit: int,
+        metadata: WorkerMetadata | None = None,
+        timeout: float = 60.0,
+    ):
         self.db = db
         self.llm = llm
-        self.recursive_limit = min(max(recursive_limit, 1), app_settings.recursive_limit_hard_cap)
+        self.metadata = metadata
         self.timeout = timeout
+        effective_limit = metadata.recursive_limit if metadata and metadata.recursive_limit else recursive_limit
+        self.recursive_limit = min(max(effective_limit, 1), app_settings.recursive_limit_hard_cap)
+
+    async def run(self, task, context, history_context=None) -> dict:
+        """Default JSON-driven run.
+
+        Args:
+            task: Task object with worker, goal, input_artifacts, meta.
+            context: HarnessContext with entities, project_summary, etc.
+            history_context: Optional chat history for LLM.
+        Returns:
+            dict with {"summary", "changes", "artifacts", "notes", "stage", "error"}.
+        """
+        if self.metadata is None:
+            raise RuntimeError(f"Worker {self.worker_name} has no metadata")
+
+        system_prompt = self.metadata.system_prompt
+        # Inject output schema into prompt if available
+        if self.metadata.output_schema:
+            schema_text = json.dumps(self.metadata.output_schema, ensure_ascii=False, indent=2)
+            system_prompt += f"\n\n你必须按以下 JSON schema 输出：\n{schema_text}\n只输出 JSON，不要 markdown 代码块，不要解释。"
+
+        user_prompt = self._build_user_prompt(task, context)
+        raw = await self._tool_loop(
+            system_prompt,
+            user_prompt,
+            extra_tools=None,
+            history_context=history_context,
+        )
+        return self._normalize_result(raw)
+
+    def _build_user_prompt(self, task, context) -> str:
+        parts = [f"【用户目标】\n{task.goal}"]
+        if task.input_artifacts:
+            parts.append(f"【输入产物】\n{json.dumps(task.input_artifacts, ensure_ascii=False)}")
+        parts.append(f"【项目摘要】\n{context.project_summary or '未提供'}")
+        entities_text = self._render_entities(context)
+        if entities_text:
+            parts.append(f"【项目实体】\n{entities_text}")
+        return "\n\n".join(parts)
+
+    def _render_entities(self, context) -> str:
+        lines = []
+        for entity_type, entities in context.entities.items():
+            if not entities:
+                continue
+            lines.append(f"[{entity_type}]")
+            for e in entities:
+                lines.append(json.dumps(e, ensure_ascii=False))
+        return "\n".join(lines)
+
+    def _normalize_result(self, raw: dict) -> dict:
+        """Ensure result has the canonical keys."""
+        if isinstance(raw, str):
+            return {"summary": raw, "changes": [], "artifacts": {}, "notes": [], "stage": self.worker_name}
+        return {
+            "summary": raw.get("summary", ""),
+            "changes": raw.get("changes") or [],
+            "artifacts": raw.get("artifacts") or {},
+            "notes": raw.get("notes") or [],
+            "stage": raw.get("stage") or self.worker_name,
+            "error": raw.get("error"),
+        }
 
     async def _tool_loop(
         self,
@@ -38,6 +111,9 @@ class WorkerBase:
             messages.extend(history_context)
         messages.append({"role": "user", "content": user_prompt})
         schemas = tool_schemas() + (extra_tools or [])
+        if self.metadata and self.metadata.tools:
+            allowed = set(self.metadata.tools)
+            schemas = [s for s in schemas if s.get("name") in allowed] + (extra_tools or [])
         calls = 0
         start = time.time()
         while calls < self.recursive_limit:
@@ -104,7 +180,6 @@ class WorkerBase:
         return parsed
 
     def _parse_tool_call(self, text: str) -> dict | None:
-        import json
         # 期望格式：TOOL_CALL:{"name": "...", "arguments": {...}}
         marker = "TOOL_CALL:"
         if marker in text:
@@ -117,7 +192,6 @@ class WorkerBase:
 
     def _parse_final(self, text: str) -> dict:
         """将 LLM 最终文本解析为结构化结果；支持纯 JSON、Markdown 代码块、JSON 子串。"""
-        import json
         cleaned = text.strip()
 
         def try_parse(value: str) -> dict | None:
@@ -175,9 +249,10 @@ async def run_worker(
     db: AsyncSession,
     llm,
     recursive_limit: int,
-    goal: str,
-    context: dict,
+    task,
+    context,
+    metadata: WorkerMetadata | None = None,
     history_context: list[dict] | None = None,
 ) -> dict:
-    worker = worker_cls(db, llm, recursive_limit)
-    return await worker.run(goal, context, history_context)
+    worker = worker_cls(db, llm, recursive_limit, metadata=metadata)
+    return await worker.run(task, context, history_context=history_context)
