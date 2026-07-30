@@ -5,6 +5,7 @@ import logging
 
 from app.agents.harness.models import HarnessError, HarnessStage
 from app.agents.harness.nodes.aggregator import aggregate_state
+from app.core.errors import AppError
 from app.agents.harness.state import HarnessState
 from app.agents.harness.nodes.analyze import analyze
 from app.agents.harness.nodes.commit import commit_state
@@ -69,6 +70,9 @@ class HarnessRuntime:
             else:
                 self.state.error = HarnessError(stage=self.state.stage, message=f"未知阶段: {self.state.stage}")
                 self.state.stage = HarnessStage.ERROR
+        except AppError:
+            logger.exception("Harness runtime error at stage %s", self.state.stage)
+            raise
         except Exception as e:
             logger.exception("Harness runtime error at stage %s", self.state.stage)
             self.state.error = HarnessError(stage=self.state.stage, message=str(e), details={"type": type(e).__name__})

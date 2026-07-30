@@ -67,13 +67,15 @@ async def test_chat_persists_messages(mock_llm_client):
 
 
 @pytest.mark.anyio
-@patch("app.api.assistant.run_supervisor")
+@patch("app.agents.harness.nodes.supervisor._parse_plan", new_callable=AsyncMock)
 @patch("app.core.llm_factory.LLMClient")
-async def test_chat_does_not_duplicate_user_input(mock_llm_client, mock_supervisor):
+async def test_chat_does_not_duplicate_user_input(mock_llm_client, mock_parse_plan):
     """当前用户消息不应在 supervisor 的 prompt 中出现两次。"""
-    mock_supervisor.return_value = {"intent": "test", "tasks": []}
+    from app.agents.harness.models import ExecutionPlan
+    mock_parse_plan.return_value = ExecutionPlan(intent="test", tasks=[])
     mock_llm = mock_llm_client.return_value
     mock_llm.chat = AsyncMock(return_value="summary")
+    mock_llm.parse_llm_json = AsyncMock(return_value={"intent": "test", "tasks": []})
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -84,8 +86,8 @@ async def test_chat_does_not_duplicate_user_input(mock_llm_client, mock_supervis
         r = await ac.post("/api/assistant/chat", json={"project_id": pid, "message": "hello"})
         assert r.status_code == 200
 
-        mock_supervisor.assert_called_once()
-        _, messages = mock_supervisor.call_args.args
+        mock_parse_plan.assert_called_once()
+        _, messages = mock_parse_plan.call_args.args
         user_contents = [m["content"] for m in messages if m["role"] == "user"]
         assert user_contents.count("hello") == 1
 

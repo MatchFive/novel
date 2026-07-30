@@ -138,6 +138,17 @@ async def test_run_captures_exception_and_transitions_to_error():
 
 
 @pytest.mark.anyio
+async def test_run_propagates_app_error():
+    from app.core.errors import AppError
+    with patch("app.agents.harness.runtime.commit_state", new_callable=AsyncMock) as mock_commit:
+        mock_commit.side_effect = AppError("config missing", code="TEST", status_code=503)
+
+        runtime, _, _, db = _make_runtime(HarnessStage.COMMIT)
+        with pytest.raises(AppError):
+            await runtime.run()
+
+
+@pytest.mark.anyio
 async def test_step_transitions_one_stage_at_a_time():
     with patch("app.agents.harness.runtime.analyze", new_callable=AsyncMock) as mock_analyze:
         mock_analyze.side_effect = _advance_to(HarnessStage.PLAN)
