@@ -12,6 +12,7 @@ from typing import Any, Callable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.harness.models import WorkerMetadata
+from app.agents.skills.skill_manager import SkillManager, get_skill_manager
 from app.agents.tools import call_tool, tool_schemas
 from app.config import settings as app_settings
 from app.core.errors import AppError
@@ -55,7 +56,41 @@ class WorkerBase:
         # Inject output schema into prompt if available
         if self.metadata.output_schema:
             schema_text = json.dumps(self.metadata.output_schema, ensure_ascii=False, indent=2)
-            system_prompt += f"\n\n你必须按以下 JSON schema 输出：\n{schema_text}\n只输出 JSON，不要 markdown 代码块，不要解释。"
+            system_prompt += (
+                f"\n\n你必须按以下 JSON schema 输出：\n{schema_text}\n只输出 JSON，"
+                "不要 markdown 代码块，不要解释。"
+            )
+
+        skill_manager = get_skill_manager()
+
+        # Inject inline skills
+        try:
+            skill_texts = skill_manager.get_skills_for_worker(
+                self.worker_name,
+                worker_skills=self.metadata.skills,
+                task_goal=getattr(task, "goal", ""),
+            )
+            if skill_texts:
+                system_prompt += "\n\n【创作方法论参考】\n"
+                for cfg, content in skill_texts:
+                    system_prompt += f"\n--- {cfg.skill_name} ---\n{content}\n"
+        except Exception:
+            logger.exception("Failed to inject inline skills for %s", self.worker_name)
+
+        # Inject RAG skill chunks
+        try:
+            rag_results = await skill_manager.query_rag_skills(
+                self.db,
+                self.worker_name,
+                rag_skill_names=self.metadata.rag_skills,
+                query=getattr(task, "goal", ""),
+            )
+            if rag_results:
+                system_prompt += "\n\n【相关案例参考】\n"
+                for r in rag_results:
+                    system_prompt += f"\n--- {r.chunk_path} ---\n{r.chunk_text}\n"
+        except Exception:
+            logger.exception("Failed to inject RAG skills for %s", self.worker_name)
 
         user_prompt = self._build_user_prompt(task, context)
         raw = await self._tool_loop(
