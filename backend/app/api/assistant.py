@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import logging
 
+import numpy as np
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +14,7 @@ from app import repositories as repo
 from app.core.errors import AppError, NotFoundError, ValidationError
 from app.core.llm_factory import get_llm_client, get_embedding_client
 from app.database import get_db
-from app.models import AssistantSession, AssistantMessage, LongChangeRecord, Project, UserSetting
+from app.models import AssistantSession, AssistantMessage, LongChangeRecord, Project, ProjectExperience, UserSetting
 from app.agents.harness.history import (
     should_summarize,
     summarize_messages,
@@ -24,6 +26,7 @@ from app.agents.harness.runtime import HarnessRuntime
 from app.agents.harness.state import HarnessState
 from app.agents.harness.worker_manager import WorkerManager
 from app.agents.harness.nodes.responder import GLOBAL_RESPONDER_PROMPT, respond
+from app.agents.harness.nodes.reflection import reflect, ReflectionResult
 from app.services.change_apply import _ENTITY_REPO, apply_change, confirm_session, reject_session
 
 logger = logging.getLogger(__name__)
@@ -75,6 +78,63 @@ async def _last_plan_turn(db: AsyncSession, session_id: str) -> AssistantMessage
     return None
 
 
+async def _store_reflection(
+    db: AsyncSession,
+    project_id: str,
+    trigger_msg: AssistantMessage,
+    feedback: str,
+    final_changes: list[dict],
+) -> None:
+    meta = trigger_msg.metadata_ or {}
+    plan = meta.get("execution_plan")
+    original_changes = meta.get("staged_snapshot") or []
+    llm = await get_llm_client(db, level="low")
+    result: ReflectionResult = await reflect(
+        user_input=trigger_msg.content or "",
+        execution_plan=plan,
+        original_changes=original_changes,
+        final_changes=final_changes,
+        feedback=feedback,
+        llm=llm,
+    )
+    if not result.reflection_text.strip():
+        return
+
+    embedding_bytes = None
+    model_name = None
+    dimension = None
+    try:
+        embedding_client, dim = await get_embedding_client(db)
+        text_to_embed = result.reflection_text + "\n" + "\n".join(result.rules)
+        vectors = await embedding_client.embed(
+            [text_to_embed],
+            model=embedding_client.model,
+            dimensions=dim if dim > 0 else None,
+        )
+        arr = np.array(vectors[0], dtype=np.float32)
+        norm = np.linalg.norm(arr)
+        if norm > 0:
+            arr = arr / norm
+        embedding_bytes = arr.tobytes()
+        model_name = embedding_client.model
+        dimension = dim
+    except Exception:
+        logger.exception("Failed to generate experience embedding")
+
+    db.add(ProjectExperience(
+        project_id=project_id,
+        trigger_turn_id=trigger_msg.id,
+        experience_type="success" if feedback == "confirm" else "failure",
+        original_input=trigger_msg.content or "",
+        original_plan=plan or {},
+        final_change_records=final_changes,
+        reflection_text=result.reflection_text,
+        rules=result.rules,
+        embedding=embedding_bytes,
+        model=model_name,
+        dimension=dimension,
+    ))
+    await db.commit()
 def _decode_project_id(project_id: str | None) -> str | None:
     """把前端 sentinel 'global' 转成 None，表示全局会话。"""
     if project_id is None or project_id == "global":
@@ -512,7 +572,8 @@ async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
     sess = await db.get(AssistantSession, session_id)
     if not sess:
         raise NotFoundError("会话不存在")
-    if sess.project_id is None:
+    project_id = sess.project_id
+    if project_id is None:
         return {"ok": False, "errors": [{"code": "GLOBAL_SESSION", "message": "全局会话不支持确认变更"}]}
     result = await confirm_session(db, session_id, change_ids=change_ids)
     try:
@@ -528,6 +589,14 @@ async def confirm(body: dict, db: AsyncSession = Depends(get_db)):
             )
     except Exception:
         logger.exception("Failed to mark latest assistant message status")
+    if result.get("ok") and project_id:
+        try:
+            trigger_msg = await _last_plan_turn(db, session_id)
+            if trigger_msg:
+                applied_changes = result.get("applied", [])
+                await _store_reflection(db, project_id, trigger_msg, "confirm", applied_changes)
+        except Exception:
+            logger.exception("Failed to store confirm reflection")
     return result
 
 
@@ -539,6 +608,10 @@ async def reject(body: dict, db: AsyncSession = Depends(get_db)):
         raise ValidationError("session_id 必填")
     if change_ids is not None and not isinstance(change_ids, list):
         raise ValidationError("change_ids 必须是数组")
+    sess = await db.get(AssistantSession, session_id)
+    if not sess:
+        raise NotFoundError("会话不存在")
+    project_id = sess.project_id
     result = await reject_session(db, session_id, change_ids=change_ids)
     try:
         await _mark_latest_assistant_message(
@@ -546,6 +619,14 @@ async def reject(body: dict, db: AsyncSession = Depends(get_db)):
         )
     except Exception:
         logger.exception("Failed to mark latest assistant message status")
+    if project_id:
+        try:
+            trigger_msg = await _last_plan_turn(db, session_id)
+            if trigger_msg:
+                rejected_changes = result.get("rejected", [])
+                await _store_reflection(db, project_id, trigger_msg, "reject", rejected_changes)
+        except Exception:
+            logger.exception("Failed to store reject reflection")
     return result
 
 

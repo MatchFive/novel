@@ -358,13 +358,13 @@ async def reject_session(db: AsyncSession, session_id: str, change_ids: list[str
         raise NotFoundError("会话不存在")
     staged = sess.staged_changes or []
     target_ids = set(change_ids) if change_ids else None
-    rejected = 0
-    remaining = []
+    rejected: list[dict] = []
+    remaining: list[dict] = []
     for ch in staged:
         if target_ids is None or ch.get("id") in target_ids:
-            rejected += 1
+            rejected.append(ch)
         else:
             remaining.append(ch)
     sess.staged_changes = remaining
     await db.commit()
-    return {"ok": True, "rejected_count": rejected}
+    return {"ok": True, "rejected_count": len(rejected), "rejected": rejected}
