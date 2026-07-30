@@ -198,7 +198,7 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     state.context = HarnessContext(
         project_id=effective_project_id,
         user_input=user_input,
-        session_context=sess.context,
+        session_context=context_payload,
     )
 
     async def llm_factory(level: str | None = None):
