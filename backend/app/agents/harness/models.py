@@ -83,6 +83,8 @@ class HarnessError(BaseModel):
 
 
 class WorkerMetadata(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
     worker_name: str
     description: str
     system_prompt: str
@@ -93,6 +95,8 @@ class WorkerMetadata(BaseModel):
     temperature: float = 0.7
     timeout: float = 60.0
     recursive_limit: int | None = None
+    skills: list[str] = Field(default_factory=list)
+    rag_skills: list[str] = Field(default_factory=list)
 
 
 class HarnessStage(str, Enum):
