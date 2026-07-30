@@ -41,5 +41,7 @@
   "model_level": "default",
   "temperature": 0.7,
   "timeout": 60.0,
-  "recursive_limit": 8
+  "recursive_limit": 8,
+  "skills": ["plot_design", "pacing"],
+  "rag_skills": ["wangwenclub_case"]
 }
