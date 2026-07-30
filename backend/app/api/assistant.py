@@ -57,6 +57,24 @@ async def _recursive_limit(db) -> int:
     return s.recursive_limit if s else 8
 
 
+async def _last_plan_turn(db: AsyncSession, session_id: str) -> AssistantMessage | None:
+    """Return the most recent assistant message that carried an execution_plan."""
+    from sqlalchemy import select
+    res = await db.execute(
+        select(AssistantMessage)
+        .where(
+            AssistantMessage.session_id == session_id,
+            AssistantMessage.role == "assistant",
+        )
+        .order_by(AssistantMessage.created_at.desc())
+    )
+    for msg in res.scalars().all():
+        meta = msg.metadata_ or {}
+        if meta.get("execution_plan") is not None:
+            return msg
+    return None
+
+
 def _decode_project_id(project_id: str | None) -> str | None:
     """把前端 sentinel 'global' 转成 None，表示全局会话。"""
     if project_id is None or project_id == "global":
@@ -278,6 +296,8 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
                 "change_record_ids": [r.get("id") for r in records_data],
                 "context": context_payload,
                 "auto_applied": auto_applied,
+                "execution_plan": final_state.plan.model_dump() if final_state.plan else None,
+                "staged_snapshot": records_data,
             },
         )
         db.add(assistant_msg)
