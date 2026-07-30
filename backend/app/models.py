@@ -174,6 +174,26 @@ class SkillRagEmbedding(Base):
     created_at = Column(DateTime, default=_now, nullable=False)
 
 
+class ProjectExperience(Base):
+    """项目级经验沉淀：从用户 confirm/reject/adjust 行为中学习的结构化记录。"""
+
+    __tablename__ = "project_experiences"
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    project_id = Column(CHAR(36), ForeignKey("projects.id"), nullable=False, index=True)
+    trigger_turn_id = Column(CHAR(36), ForeignKey("assistant_messages.id"), nullable=True)
+    experience_type = Column(String(16), nullable=False)  # success | failure | adjustment
+    original_input = Column(Text, nullable=False)
+    original_plan = Column(JSON, default=dict)
+    final_change_records = Column(JSON, default=list)
+    reflection_text = Column(Text, nullable=False)
+    rules = Column(JSON, default=list)
+    embedding = Column(LargeBinary, nullable=True)
+    model = Column(String(128), nullable=True)
+    dimension = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+
 # ---------------- 长篇小说数据（全部 project_id 外键） ----------------
 
 class LongOutline(Base):

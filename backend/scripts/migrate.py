@@ -62,6 +62,25 @@ CREATE_TABLES = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_skill_rag_embeddings_skill_name ON skill_rag_embeddings(skill_name)",
     "DROP TABLE IF EXISTS message_embeddings",
+    """
+    CREATE TABLE IF NOT EXISTS project_experiences (
+        id CHAR(36) PRIMARY KEY,
+        project_id CHAR(36) NOT NULL,
+        trigger_turn_id CHAR(36),
+        experience_type VARCHAR(16) NOT NULL,
+        original_input TEXT NOT NULL,
+        original_plan TEXT DEFAULT '{}',
+        final_change_records TEXT DEFAULT '[]',
+        reflection_text TEXT NOT NULL,
+        rules TEXT DEFAULT '[]',
+        embedding BLOB,
+        model VARCHAR(128),
+        dimension INTEGER,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (project_id) REFERENCES projects(id)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_project_experiences_project_id ON project_experiences(project_id)",
 ]
 
 # Order matters: drop short-fiction tables first (they reference projects), then
