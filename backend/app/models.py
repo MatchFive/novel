@@ -159,6 +159,21 @@ class AssistantSummaryEmbedding(Base):
     created_at = Column(DateTime, default=_now, nullable=False)
 
 
+class SkillRagEmbedding(Base):
+    """技能 RAG 文本块的 embedding，用于按用户输入检索相关技能上下文。"""
+
+    __tablename__ = "skill_rag_embeddings"
+
+    id = Column(CHAR(36), primary_key=True, default=_uuid)
+    skill_name = Column(String(64), nullable=False, index=True)
+    chunk_path = Column(String(512), nullable=False)
+    chunk_text = Column(Text, nullable=False)
+    embedding = Column(LargeBinary, nullable=False)
+    model = Column(String(128), nullable=False)
+    dimension = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+
 # ---------------- 长篇小说数据（全部 project_id 外键） ----------------
 
 class LongOutline(Base):
