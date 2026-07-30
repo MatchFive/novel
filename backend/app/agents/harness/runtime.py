@@ -53,18 +53,20 @@ class HarnessRuntime:
                 llm = await self.llm_factory("medium")
                 self.state = await supervisor(self.state, llm, self.manager)
             elif self.state.stage == HarnessStage.EXECUTE:
+                history_context = self.state.context.session_context.get("history_context")
                 self.state = await executor(
                     self.state,
                     self.db,
                     self.llm_factory,
                     self.recursive_limit,
-                    history_context=None,  # history injected per node if needed
+                    history_context=history_context,
                 )
             elif self.state.stage == HarnessStage.AGGREGATE:
                 self.state = aggregate_state(self.state)
             elif self.state.stage == HarnessStage.RESPOND:
                 llm = await self.llm_factory("low")
-                self.state = await respond_state(self.state, llm)
+                history_context = self.state.context.session_context.get("history_context")
+                self.state = await respond_state(self.state, llm, history_context=history_context)
             elif self.state.stage == HarnessStage.COMMIT:
                 self.state = await commit_state(self.state, self.db, self.is_global)
             else:

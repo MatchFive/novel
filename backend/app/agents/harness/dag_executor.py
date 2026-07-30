@@ -20,12 +20,14 @@ class DagExecutor:
         llm_factory,
         recursive_limit: int,
         history_context: list[dict] | None = None,
+        max_concurrency: int = 3,
     ):
         self.manager = manager
         self.db = db
         self.llm_factory = llm_factory
         self.recursive_limit = recursive_limit
         self.history_context = history_context or []
+        self._semaphore = asyncio.Semaphore(max(max_concurrency, 1))
 
     async def execute(
         self,
@@ -89,16 +91,17 @@ class DagExecutor:
         return results
 
     async def _run_task(self, task: Task, context: HarnessContext) -> WorkerResult:
-        worker_cls = self.manager.get_worker_class(task.worker)
-        metadata = self.manager.get_metadata(task.worker)
-        llm = await self.llm_factory(metadata.model_level)
-        worker = worker_cls(self.db, llm, self.recursive_limit, metadata=metadata, timeout=metadata.timeout)
+        async with self._semaphore:
+            worker_cls = self.manager.get_worker_class(task.worker)
+            metadata = self.manager.get_metadata(task.worker)
+            llm = await self.llm_factory(metadata.model_level)
+            worker = worker_cls(self.db, llm, self.recursive_limit, metadata=metadata, timeout=metadata.timeout)
 
-        # Resolve input artifacts from upstream task results
-        input_artifacts: dict[str, Any] = {}
-        for key, upstream_id in task.input_artifacts.items():
-            input_artifacts[key] = context.artifacts.get(upstream_id, {})
+            # Resolve input artifacts from upstream task results
+            input_artifacts: dict[str, Any] = {}
+            for key, upstream_id in task.input_artifacts.items():
+                input_artifacts[key] = context.artifacts.get(upstream_id, {})
 
-        raw = await worker.run(task, context, history_context=self.history_context)
-        result = WorkerResult.from_raw(task.worker, task.id, raw)
-        return result
+            raw = await worker.run(task, context, history_context=self.history_context)
+            result = WorkerResult.from_raw(task.worker, task.id, raw)
+            return result

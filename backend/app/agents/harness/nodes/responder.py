@@ -115,7 +115,7 @@ async def respond(
         return "已生成以下变更建议，请在确认后应用：\n" + listing
 
 
-async def respond_state(state: HarnessState, llm) -> HarnessState:
+async def respond_state(state: HarnessState, llm, history_context: list[dict] | None = None) -> HarnessState:
     worker_results = [
         {
             "worker": r.worker,
@@ -129,7 +129,7 @@ async def respond_state(state: HarnessState, llm) -> HarnessState:
         llm,
         state.change_records,
         user_input=state.user_input,
-        history_context=None,  # history handled separately
+        history_context=history_context,
         system_prompt=GLOBAL_RESPONDER_PROMPT if not state.project_id else None,
         context=state.context.entities if state.project_id else None,
         worker_results=worker_results,

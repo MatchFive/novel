@@ -88,12 +88,13 @@ async def analyze(
     else:
         history_context = _build_history_context_manual(recent_messages, retrieved_summaries)
 
+    session_context = {**(state.context.session_context or {}), "history_context": history_context}
     state.context = HarnessContext(
         project_id=project_id,
         user_input=state.user_input,
         project_summary=project_summary,
         entities=entities,
-        session_context={"history_context": history_context},
+        session_context=session_context,
     )
     state.stage = HarnessStage.PLAN
     return state

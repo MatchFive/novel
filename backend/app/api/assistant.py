@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import repositories as repo
 from app.core.errors import AppError, NotFoundError, ValidationError
 from app.core.llm_factory import get_llm_client, get_embedding_client
 from app.database import get_db
@@ -94,7 +95,7 @@ def _rule_based_plan(user_input: str) -> dict | None:
         return {"intent": f"生成{label}{'细纲' if worker == 'chapter_outline' else '正文'}", "tasks": [{"worker": worker, "goal": user_input}]}
 
     # Compound intent
-    has_character = any(kw in text for kw in ("角色", "人物", "主角", "配角", "龙套", "npc"))
+    has_character = any(kw in text for kw in ("角色", "人物", "主角", "配角", "龙套", "npc", "性格", "能力", "关系", "命运", "力量", "修炼境界"))
     has_world = any(kw in text for kw in ("世界观", "设定", "规则", "体系", "境界"))
     has_outline_modify = any(kw in text for kw in ("完善大纲", "调整大纲", "更新大纲", "修改大纲"))
     has_foreshadow = any(kw in text for kw in ("伏笔", "悬念", "回收", "呼应", "预埋"))
@@ -220,6 +221,19 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
     if rule_plan:
         from app.agents.harness.models import ExecutionPlan, Task
         import uuid
+        # Populate project context so workers have entity data even though analyze() was skipped.
+        if effective_project_id:
+            project = await db.get(Project, effective_project_id)
+            if project:
+                state.context.project_summary = f"{project.title}\n{project.description}".strip()
+            state.context.entities = {
+                "outlines": await repo.list_outlines(db, effective_project_id),
+                "characters": await repo.list_characters(db, effective_project_id),
+                "foreshadows": await repo.list_foreshadows(db, effective_project_id),
+                "world": await repo.list_world(db, effective_project_id),
+                "plot": await repo.list_plot(db, effective_project_id),
+                "chapters": await repo.list_chapters(db, effective_project_id),
+            }
         state.plan = ExecutionPlan(
             intent=rule_plan["intent"],
             tasks=[Task(id=f"task_{uuid.uuid4().hex[:8]}", worker=t["worker"], goal=t["goal"]) for t in rule_plan["tasks"]],
