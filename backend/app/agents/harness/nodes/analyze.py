@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import repositories as repo
 from app.agents.harness.history import build_history_context
+from app.agents.harness.experience_retrieval import retrieve_project_experiences
 from app.agents.harness.models import HarnessContext, HarnessStage
 from app.agents.harness.retrieval import retrieve_similar_summaries
 from app.agents.harness.state import HarnessState
@@ -76,6 +77,22 @@ async def analyze(
     except Exception:
         pass
 
+    # Retrieve project experiences (best-effort)
+    retrieved_experiences: list[dict] = []
+    try:
+        embedding_client, dimension = await get_embedding_client(db)
+        query_vectors = await embedding_client.embed(
+            [state.user_input],
+            model=embedding_client.model,
+            dimensions=dimension if dimension > 0 else None,
+        )
+        if project_id:
+            retrieved_experiences = await retrieve_project_experiences(
+                db, project_id, query_vectors[0], top_k=3
+            )
+    except Exception:
+        pass
+
     # Build history context, preferring the session-aware helper when possible.
     session: AssistantSession | None = None
     if state.session_id:
@@ -88,7 +105,11 @@ async def analyze(
     else:
         history_context = _build_history_context_manual(recent_messages, retrieved_summaries)
 
-    session_context = {**(state.context.session_context or {}), "history_context": history_context}
+    session_context = {
+        **(state.context.session_context or {}),
+        "history_context": history_context,
+        "retrieved_experiences": retrieved_experiences,
+    }
     state.context = HarnessContext(
         project_id=project_id,
         user_input=state.user_input,

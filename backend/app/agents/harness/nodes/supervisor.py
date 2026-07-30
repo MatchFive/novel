@@ -51,6 +51,16 @@ async def supervisor(state: HarnessState, llm: LLMClient, manager: WorkerManager
         context_note = f"\n\n当前会话上下文：{state.context.session_context}"
 
     prompt = _build_supervisor_prompt(metadata, context_note)
+
+    experiences = state.context.session_context.get("retrieved_experiences") or []
+    if experiences:
+        exp_text = "\n\n【项目历史经验】\n"
+        for i, exp in enumerate(experiences, 1):
+            exp_text += f"{i}. {exp['reflection_text']}\n"
+            for rule in exp.get("rules") or []:
+                exp_text += f"   - {rule}\n"
+        prompt += exp_text
+
     messages = [
         {"role": "system", "content": prompt},
         {"role": "user", "content": state.user_input},
