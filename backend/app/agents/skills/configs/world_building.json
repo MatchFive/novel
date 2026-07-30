@@ -1,0 +1,8 @@
+{
+  "skill_name": "world_building",
+  "description": "世界观构建方法论：力量体系、地理设定、社会结构、经济系统、历史背景、自洽原则",
+  "type": "inline",
+  "triggers": ["world", "outline", "chapter_text"],
+  "content_file": "registry/world_building.md",
+  "priority": 2
+}

@@ -1,0 +1,8 @@
+{
+  "skill_name": "plot_design",
+  "description": "网络小说情节设计方法论：目标驱动、冲突推动、三幕剧、英雄之旅、爽文模式",
+  "type": "inline",
+  "triggers": ["outline", "plot", "plot_nodes", "chapter_outline", "chapter_text"],
+  "content_file": "registry/plot_design.md",
+  "priority": 1
+}

@@ -1,0 +1,8 @@
+{
+  "skill_name": "writing_process",
+  "description": "网文创作全流程：选题立意、世界观设定、人物设定、大纲准备、日常写作流程",
+  "type": "inline",
+  "triggers": ["outline", "broad_outline", "plot_nodes", "chapter_text"],
+  "content_file": "registry/writing_process.md",
+  "priority": 1
+}

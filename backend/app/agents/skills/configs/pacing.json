@@ -1,0 +1,8 @@
+{
+  "skill_name": "pacing",
+  "description": "节奏控制方法论：不同阶段节奏、章节长度、爽点分布、张弛变化",
+  "type": "inline",
+  "triggers": ["outline", "chapter_outline", "chapter_text"],
+  "content_file": "registry/pacing.md",
+  "priority": 2
+}

@@ -1,0 +1,8 @@
+{
+  "skill_name": "climax_hook",
+  "description": "高潮设计方法论：高潮类型、战斗/智斗/情感/突破高潮结构、描写技巧",
+  "type": "inline",
+  "triggers": ["outline", "chapter_outline", "chapter_text"],
+  "content_file": "registry/climax_hook.md",
+  "priority": 2
+}

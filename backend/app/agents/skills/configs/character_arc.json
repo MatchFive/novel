@@ -1,0 +1,8 @@
+{
+  "skill_name": "character_arc",
+  "description": "人物塑造方法论：主角要素、配角塑造、反派原则、人物档案模板",
+  "type": "inline",
+  "triggers": ["character", "chapter_text"],
+  "content_file": "registry/character_arc.md",
+  "priority": 1
+}

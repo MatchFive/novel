@@ -1,0 +1,8 @@
+{
+  "skill_name": "foreshadowing",
+  "description": "伏笔与照应方法论：伏笔类型、照应类型、远近明暗多重群体连环伏笔技巧",
+  "type": "inline",
+  "triggers": ["foreshadow", "outline", "plot", "chapter_outline"],
+  "content_file": "registry/foreshadowing.md",
+  "priority": 1
+}
