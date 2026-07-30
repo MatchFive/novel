@@ -60,8 +60,10 @@ async def analyze(
             "chapters": await repo.list_chapters(db, project_id),
         }
 
-    # Retrieve similar summaries (best-effort)
-    retrieved_summaries: list[dict] = []
+    # Compute query embedding once (best-effort). Both downstream retrievals
+    # share the same vector, but each is wrapped in its own try/except so a
+    # failure in one does not affect the other.
+    query_vector: list[float] | None = None
     try:
         embedding_client, dimension = await get_embedding_client(db)
         query_vectors = await embedding_client.embed(
@@ -69,29 +71,31 @@ async def analyze(
             model=embedding_client.model,
             dimensions=dimension if dimension > 0 else None,
         )
-        top_k = max(0, settings.assistant_history_top_k or 5)
-        if top_k > 0:
-            retrieved_summaries = await retrieve_similar_summaries(
-                db, state.session_id, query_vectors[0], top_k
-            )
+        query_vector = query_vectors[0]
     except Exception:
         pass
 
+    # Retrieve similar summaries (best-effort)
+    retrieved_summaries: list[dict] = []
+    if query_vector is not None:
+        try:
+            top_k = max(0, settings.assistant_history_top_k or 5)
+            if top_k > 0:
+                retrieved_summaries = await retrieve_similar_summaries(
+                    db, state.session_id, query_vector, top_k
+                )
+        except Exception:
+            pass
+
     # Retrieve project experiences (best-effort)
     retrieved_experiences: list[dict] = []
-    try:
-        embedding_client, dimension = await get_embedding_client(db)
-        query_vectors = await embedding_client.embed(
-            [state.user_input],
-            model=embedding_client.model,
-            dimensions=dimension if dimension > 0 else None,
-        )
-        if project_id:
+    if query_vector is not None and project_id:
+        try:
             retrieved_experiences = await retrieve_project_experiences(
-                db, project_id, query_vectors[0], top_k=3
+                db, project_id, query_vector, top_k=3
             )
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     # Build history context, preferring the session-aware helper when possible.
     session: AssistantSession | None = None

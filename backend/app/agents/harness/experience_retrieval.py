@@ -4,12 +4,22 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import ProjectExperience
 
 logger = logging.getLogger(__name__)
+
+
+class ExperienceMatch(BaseModel):
+    """A scored ProjectExperience match returned by cosine retrieval."""
+
+    reflection_text: str
+    rules: list[str]
+    experience_type: str
+    score: float
 
 
 def _normalize(v: np.ndarray) -> np.ndarray:
@@ -52,15 +62,16 @@ async def retrieve_project_experiences(
                 scored.append((score, row))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [
-            {
-                "reflection_text": row.reflection_text,
-                "rules": row.rules or [],
-                "experience_type": row.experience_type,
-                "score": score,
-            }
+        matches = [
+            ExperienceMatch(
+                reflection_text=row.reflection_text,
+                rules=row.rules or [],
+                experience_type=row.experience_type,
+                score=score,
+            )
             for score, row in scored[:top_k]
         ]
+        return [m.model_dump() for m in matches]
     except Exception:
         logger.exception("Failed to retrieve project experiences")
         return []
