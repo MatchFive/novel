@@ -1,0 +1,9 @@
+{
+  "skill_name": "wangwenclub_case",
+  "description": "网文俱乐部创作案例库：情节、人物、世界观、伏笔、节奏、高潮等长文指南 chunks",
+  "type": "rag",
+  "chunks_dir": "rag/chunks/wangwenclub/",
+  "index_table": "skill_rag_embeddings",
+  "top_k": 3,
+  "priority": 2
+}
