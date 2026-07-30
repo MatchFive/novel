@@ -29,6 +29,7 @@ class OutlineSplitWorker(WorkerBase):
             return {"changes": [], "stage": "outline_split", "error": "目标大纲不存在"}
 
         system = self.metadata.system_prompt if self.metadata else ""
+        system = await self._inject_skills(system, task)
         user = f"【目标条目类型】{target.get('type')}\n【标题】{target.get('title')}\n【内容】\n{target.get('content', '')}\n\n【用户目标】\n{goal}"
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         if history_context:

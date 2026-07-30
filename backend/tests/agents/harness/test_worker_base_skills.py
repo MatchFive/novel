@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from app.agents.harness.models import HarnessContext, Task, WorkerMetadata
 from app.agents.harness.worker_base import WorkerBase
+from app.agents.harness.workers.character_worker import CharacterWorker
 
 
 class TestWorkerBaseSkillInjection(unittest.IsolatedAsyncioTestCase):
@@ -39,6 +40,38 @@ class TestWorkerBaseSkillInjection(unittest.IsolatedAsyncioTestCase):
         self.assertIn("character_arc", captured_prompts["system"])
         self.assertIn("主角塑造", captured_prompts["system"])
         self.assertEqual(result["summary"], "ok")
+
+    async def test_character_worker_calls_skill_injection(self):
+        metadata = WorkerMetadata(
+            worker_name="character",
+            description="test",
+            system_prompt="You are a character worker.",
+            tools=[],
+            input_schema={},
+            output_schema={},
+            skills=["character_arc"],
+            rag_skills=[],
+        )
+
+        db = MagicMock()
+        llm = MagicMock()
+        worker = CharacterWorker(db, llm, 8, metadata=metadata, timeout=60.0)
+
+        injected_marker = "INJECTED_SKILLS"
+        worker._inject_skills = AsyncMock(return_value=injected_marker)
+
+        async def fake_tool_loop(system_prompt, user_prompt, extra_tools=None, history_context=None):
+            return {"summary": "ok", "changes": []}
+
+        worker._tool_loop = fake_tool_loop
+
+        task = Task(id="t2", worker="character", goal="设计配角")
+        context = HarnessContext()
+        result = await worker.run(task, context)
+
+        worker._inject_skills.assert_awaited_once_with(metadata.system_prompt, task)
+        self.assertEqual(result["stage"], "character")
+        self.assertEqual(result["changes"], [])
 
 
 if __name__ == "__main__":

@@ -45,6 +45,7 @@ class AssignmentWorker(WorkerBase):
             "target_words": target_words,
         }
         system = assignment_prompt(prompt_context)
+        system = await self._inject_skills(system, task)
         user_prompt_text = user_prompt(goal, related)
         messages = [
             {"role": "system", "content": system},

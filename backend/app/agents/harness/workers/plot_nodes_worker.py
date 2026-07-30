@@ -49,6 +49,7 @@ class PlotNodesWorker(WorkerBase):
             "world": context_entity_list(context, "world"),
         }
         system = plot_nodes_prompt(prompt_context)
+        system = await self._inject_skills(system, task)
         user_prompt_text = user_prompt(goal, related)
         messages = [
             {"role": "system", "content": system},

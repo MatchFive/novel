@@ -39,6 +39,7 @@ class ForeshadowWorker(WorkerBase):
         existing_ids = {f.get("id") for f in foreshadows if f.get("id")}
 
         system = self.metadata.system_prompt if self.metadata else ""
+        system = await self._inject_skills(system, task)
         user_prompt = (
             f"【现有伏笔】\n{foreshadows_desc}\n\n"
             f"【相关上下文】\n{related or '（无）'}\n\n"

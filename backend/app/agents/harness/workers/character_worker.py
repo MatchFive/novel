@@ -40,6 +40,7 @@ class CharacterWorker(WorkerBase):
         ) or "暂无现有角色。"
 
         system = self.metadata.system_prompt if self.metadata else ""
+        system = await self._inject_skills(system, task)
         user_prompt = f"【现有角色】\n{chars_desc}\n\n【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
         raw = await self._tool_loop(system, user_prompt, history_context=history_context)
 

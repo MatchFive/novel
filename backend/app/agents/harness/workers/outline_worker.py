@@ -47,6 +47,7 @@ class OutlineWorker(WorkerBase):
         ) or "暂无现有角色。"
 
         system = self.metadata.system_prompt if self.metadata else ""
+        system = await self._inject_skills(system, task)
         user_prompt = (
             f"【项目摘要】\n{context_project_summary(context) or '未提供'}\n\n"
             f"【现有大纲】\n{json.dumps(existing_outlines, ensure_ascii=False, indent=2)}\n\n"

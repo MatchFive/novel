@@ -85,6 +85,7 @@ class ChapterTextWorker(WorkerBase):
             "target_words": target_words,
             "character_memories": character_memories,
         })
+        system = await self._inject_skills(system, task)
 
         # —— 分段连续生成 ——
         segments: list[str] = []

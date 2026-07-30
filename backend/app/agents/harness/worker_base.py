@@ -61,36 +61,7 @@ class WorkerBase:
                 "不要 markdown 代码块，不要解释。"
             )
 
-        skill_manager = get_skill_manager()
-
-        # Inject inline skills
-        try:
-            skill_texts = skill_manager.get_skills_for_worker(
-                self.worker_name,
-                worker_skills=self.metadata.skills,
-                task_goal=getattr(task, "goal", ""),
-            )
-            if skill_texts:
-                system_prompt += "\n\n【创作方法论参考】\n"
-                for cfg, content in skill_texts:
-                    system_prompt += f"\n--- {cfg.skill_name} ---\n{content}\n"
-        except Exception:
-            logger.exception("Failed to inject inline skills for %s", self.worker_name)
-
-        # Inject RAG skill chunks
-        try:
-            rag_results = await skill_manager.query_rag_skills(
-                self.db,
-                self.worker_name,
-                rag_skill_names=self.metadata.rag_skills,
-                query=getattr(task, "goal", ""),
-            )
-            if rag_results:
-                system_prompt += "\n\n【相关案例参考】\n"
-                for r in rag_results:
-                    system_prompt += f"\n--- {r.chunk_path} ---\n{r.chunk_text}\n"
-        except Exception:
-            logger.exception("Failed to inject RAG skills for %s", self.worker_name)
+        system_prompt = await self._inject_skills(system_prompt, task)
 
         user_prompt = self._build_user_prompt(task, context)
         raw = await self._tool_loop(
@@ -100,6 +71,39 @@ class WorkerBase:
             history_context=history_context,
         )
         return self._normalize_result(raw)
+
+    async def _inject_skills(self, system_prompt: str, task) -> str:
+        """Append inline and RAG skill references to the system prompt."""
+        if not system_prompt:
+            system_prompt = ""
+        skill_manager = get_skill_manager()
+        try:
+            skill_texts = skill_manager.get_skills_for_worker(
+                self.worker_name,
+                worker_skills=self.metadata.skills if self.metadata else [],
+                task_goal=getattr(task, "goal", ""),
+            )
+            if skill_texts:
+                system_prompt += "\n\n【创作方法论参考】\n"
+                for cfg, content in skill_texts:
+                    system_prompt += f"\n--- {cfg.skill_name} ---\n{content}\n"
+        except Exception:
+            logger.exception("Failed to inject inline skills for %s", self.worker_name)
+
+        try:
+            rag_results = await skill_manager.query_rag_skills(
+                self.db,
+                self.worker_name,
+                rag_skill_names=self.metadata.rag_skills if self.metadata else [],
+                query=getattr(task, "goal", ""),
+            )
+            if rag_results:
+                system_prompt += "\n\n【相关案例参考】\n"
+                for r in rag_results:
+                    system_prompt += f"\n--- {r.chunk_path} ---\n{r.chunk_text}\n"
+        except Exception:
+            logger.exception("Failed to inject RAG skills for %s", self.worker_name)
+        return system_prompt
 
     def _build_user_prompt(self, task, context) -> str:
         parts = [f"【用户目标】\n{task.goal}"]

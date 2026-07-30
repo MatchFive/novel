@@ -105,6 +105,7 @@ class ChapterOutlineWorker(WorkerBase):
                 "target_words": target_words,
             }
             system = chapter_outline_prompt(prompt_context)
+            system = await self._inject_skills(system, task)
             user_prompt_text = user_prompt(
                 f"生成第 {chapter_num} 章细纲",
                 related,

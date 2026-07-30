@@ -39,6 +39,7 @@ class PlotWorker(WorkerBase):
         existing_ids = {p.get("id") for p in plots if p.get("id")}
 
         system = self.metadata.system_prompt if self.metadata else ""
+        system = await self._inject_skills(system, task)
         user_prompt = (
             f"【现有剧情节点】\n{plots_desc}\n\n"
             f"【相关上下文】\n{related or '（无）'}\n\n"

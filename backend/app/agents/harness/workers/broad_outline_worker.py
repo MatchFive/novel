@@ -67,6 +67,7 @@ class BroadOutlineWorker(WorkerBase):
             "plot_nodes": context_entity_list(context, "plot"),
         }
         system = broad_outline_prompt(prompt_context)
+        system = await self._inject_skills(system, task)
         user_prompt_text = user_prompt(goal, related)
         messages = [
             {"role": "system", "content": system},

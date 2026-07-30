@@ -38,5 +38,6 @@ class WorldWorker(WorkerBase):
         ) or "暂无现有世界观设定。"
 
         system = self.metadata.system_prompt if self.metadata else ""
+        system = await self._inject_skills(system, task)
         user_prompt = f"【现有世界观】\n{worlds_desc}\n\n【相关上下文】\n{related or '（无）'}\n\n【用户目标】\n{goal}"
         return await self._tool_loop(system, user_prompt, history_context=history_context)

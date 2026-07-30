@@ -48,6 +48,19 @@ CREATE_TABLES = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_assistant_summary_embeddings_session_id ON assistant_summary_embeddings(session_id)",
+    """
+    CREATE TABLE IF NOT EXISTS skill_rag_embeddings (
+        id CHAR(36) PRIMARY KEY,
+        skill_name VARCHAR(64) NOT NULL,
+        chunk_path VARCHAR(512) NOT NULL,
+        chunk_text TEXT NOT NULL,
+        embedding BLOB NOT NULL,
+        model VARCHAR(128) NOT NULL,
+        dimension INTEGER NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_skill_rag_embeddings_skill_name ON skill_rag_embeddings(skill_name)",
     "DROP TABLE IF EXISTS message_embeddings",
 ]
 
