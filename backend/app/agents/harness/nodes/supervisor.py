@@ -48,7 +48,14 @@ async def supervisor(state: HarnessState, llm: LLMClient, manager: WorkerManager
     metadata = manager.list_workers()
     context_note = ""
     if state.context.session_context:
-        context_note = f"\n\n当前会话上下文：{state.context.session_context}"
+        # Dump session context but keep retrieved_experiences out of the raw dump;
+        # they are formatted and appended separately below to avoid double exposure.
+        dumped_context = {
+            k: v for k, v in state.context.session_context.items()
+            if k != "retrieved_experiences"
+        }
+        if dumped_context:
+            context_note = f"\n\n当前会话上下文：{dumped_context}"
 
     prompt = _build_supervisor_prompt(metadata, context_note)
 

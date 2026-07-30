@@ -121,10 +121,18 @@ async def _store_reflection(
     except Exception:
         logger.exception("Failed to generate experience embedding")
 
+    experience_type: str
+    if feedback == "confirm":
+        experience_type = "success"
+    elif feedback == "adjust":
+        experience_type = "adjustment"
+    else:
+        experience_type = "failure"
+
     db.add(ProjectExperience(
         project_id=project_id,
         trigger_turn_id=trigger_msg.id,
-        experience_type="success" if feedback == "confirm" else "failure",
+        experience_type=experience_type,
         original_input=trigger_msg.content or "",
         original_plan=plan or {},
         final_change_records=final_changes,
