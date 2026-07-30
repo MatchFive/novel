@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 SKILLS_DIR = Path(__file__).parent.parent
 CONFIG_DIR = SKILLS_DIR / "configs"
-CHUNKS_DIR = SKILLS_DIR / "rag" / "chunks"
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
