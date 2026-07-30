@@ -70,11 +70,7 @@ async def reflect(
         feedback=feedback,
     )
     try:
-        raw = await llm.chat(
-            [{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(raw)
+        data = await llm.parse_llm_json([{"role": "user", "content": prompt}])
         if isinstance(data, str):
             data = json.loads(data)
         return ReflectionResult(
