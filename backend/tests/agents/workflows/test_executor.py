@@ -117,6 +117,26 @@ class TestWorkflowExecutor(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("conditional", ctx.outputs)
         self.assertTrue(any("跳过 conditional" in m for m in result.messages))
 
+    async def test_builtin_memory_condition_syntax(self):
+        """Built-in memory_update condition must use bracket syntax on dict outputs."""
+        from app.agents.workflows.executor import _eval_condition
+        from app.agents.workflows.registry import load_workflow_definition
+
+        definition = load_workflow_definition("memory_update")
+        apply_step = next(s for s in definition.steps if s.name == "apply")
+        self.assertTrue(apply_step.condition)
+
+        outputs = {"extract": {"drafts": [{"content": "x"}]}}
+        self.assertTrue(
+            _eval_condition(apply_step.condition, WorkflowContext(db=None, llm_factory=AsyncMock(), inputs={"auto_apply": True}, outputs=outputs))
+        )
+        self.assertFalse(
+            _eval_condition(apply_step.condition, WorkflowContext(db=None, llm_factory=AsyncMock(), inputs={"auto_apply": False}, outputs=outputs))
+        )
+        self.assertFalse(
+            _eval_condition(apply_step.condition, WorkflowContext(db=None, llm_factory=AsyncMock(), inputs={"auto_apply": True}, outputs={"extract": {"drafts": []}}))
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

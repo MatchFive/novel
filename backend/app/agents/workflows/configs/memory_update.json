@@ -15,7 +15,7 @@
       "name": "apply",
       "fn": "memory_update.apply_changes",
       "depends_on": ["build_changes"],
-      "condition": "outputs.extract.drafts and inputs.auto_apply"
+      "condition": "outputs['extract']['drafts'] and inputs.get('auto_apply')"
     }
   ],
   "input_schema": {
