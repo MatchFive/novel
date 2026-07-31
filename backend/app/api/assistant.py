@@ -150,55 +150,6 @@ def _decode_project_id(project_id: str | None) -> str | None:
     return project_id
 
 
-def _rule_based_plan(user_input: str) -> dict | None:
-    """Return a simple plan dict for chapter generation / foreshadow / compound intents.
-
-    This is a compatibility bridge while the LLM supervisor learns to output DAGs.
-    """
-    text = user_input.lower()
-    # Chapter generation
-    range_match = __import__("re").search(r"第\s*(\d+)\s*章\s*(?:到|至)\s*第\s*(\d+)\s*章", user_input)
-    prefix_match = __import__("re").search(r"前\s*(\d+)\s*章", user_input)
-    single_match = __import__("re").search(r"第\s*(\d+)\s*章", user_input)
-    chapter_nums = None
-    label = ""
-    if range_match:
-        start, end = int(range_match.group(1)), int(range_match.group(2))
-        chapter_nums = list(range(start, end + 1))
-        label = f"第 {start} 章到第 {end} 章"
-    elif prefix_match:
-        n = int(prefix_match.group(1))
-        chapter_nums = list(range(1, n + 1))
-        label = f"前 {n} 章"
-    elif single_match:
-        chapter_nums = [int(single_match.group(1))]
-        label = f"第 {chapter_nums[0]} 章"
-
-    if chapter_nums:
-        has_outline = "细纲" in user_input or "章节大纲" in user_input
-        has_text = "正文" in user_input or "写" in user_input
-        worker = "chapter_outline" if has_outline or not has_text else "chapter_text"
-        return {"intent": f"生成{label}{'细纲' if worker == 'chapter_outline' else '正文'}", "tasks": [{"worker": worker, "goal": user_input}]}
-
-    # Compound intent
-    has_character = any(kw in text for kw in ("角色", "人物", "主角", "配角", "龙套", "npc", "性格", "能力", "关系", "命运", "力量", "修炼境界"))
-    has_world = any(kw in text for kw in ("世界观", "设定", "规则", "体系", "境界"))
-    has_outline_modify = any(kw in text for kw in ("完善大纲", "调整大纲", "更新大纲", "修改大纲"))
-    has_foreshadow = any(kw in text for kw in ("伏笔", "悬念", "回收", "呼应", "预埋"))
-    tasks = []
-    if has_foreshadow:
-        tasks.append({"worker": "foreshadow", "goal": user_input})
-    if has_world:
-        tasks.append({"worker": "world", "goal": user_input})
-    if has_character:
-        tasks.append({"worker": "character", "goal": user_input})
-    if has_outline_modify:
-        tasks.append({"worker": "outline", "goal": user_input})
-    if len(tasks) > 1:
-        return {"intent": user_input, "tasks": tasks}
-    return None
-
-
 _CHAPTER_AUTO_FIELDS = {"content", "detailed_outline", "status"}
 
 
@@ -301,30 +252,6 @@ async def chat(body: dict, db: AsyncSession = Depends(get_db)):
         is_global=is_global,
         recursive_limit=recursive_limit,
     )
-
-    # Rule-based pre-planning for chapter generation / compound intent
-    rule_plan = _rule_based_plan(user_input) if not is_global else None
-    if rule_plan:
-        from app.agents.harness.models import ExecutionPlan, Task
-        import uuid
-        # Populate project context so workers have entity data even though analyze() was skipped.
-        if effective_project_id:
-            project = await db.get(Project, effective_project_id)
-            if project:
-                state.context.project_summary = f"{project.title}\n{project.description}".strip()
-            state.context.entities = {
-                "outlines": await repo.list_outlines(db, effective_project_id),
-                "characters": await repo.list_characters(db, effective_project_id),
-                "foreshadows": await repo.list_foreshadows(db, effective_project_id),
-                "world": await repo.list_world(db, effective_project_id),
-                "plot": await repo.list_plot(db, effective_project_id),
-                "chapters": await repo.list_chapters(db, effective_project_id),
-            }
-        state.plan = ExecutionPlan(
-            intent=rule_plan["intent"],
-            tasks=[Task(id=f"task_{uuid.uuid4().hex[:8]}", worker=t["worker"], goal=t["goal"]) for t in rule_plan["tasks"]],
-        )
-        state.stage = HarnessStage.EXECUTE
 
     final_state = await runtime.run()
 
