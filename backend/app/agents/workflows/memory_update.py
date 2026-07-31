@@ -82,6 +82,15 @@ async def apply_changes(ctx):
                     updated += 1
                 elif action == "delete":
                     deleted += 1
+            else:
+                msg = result.get("message") or "apply_change returned failure"
+                code = result.get("code") or "apply_failed"
+                logger.error("apply_change failed for memory record: %s", msg)
+                errors.append({
+                    "record": record,
+                    "code": code,
+                    "message": msg,
+                })
         except AppError as exc:
             logger.error("apply_change failed for memory record: %s", exc.message)
             errors.append({
