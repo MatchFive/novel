@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 from app import repositories as repo
-from app.agents.harness.models import HarnessContext
 from app.agents.harness.worker_base import WorkerBase
 from app.agents.harness.workers._compat import context_project_id, task_goal
 from app.agents.harness.workers._chapter_utils import find_target_chapter
@@ -28,6 +27,8 @@ class ChapterTextWorker(WorkerBase):
         if not chapter:
             return {"changes": [], "stage": "chapter_text", "error": "未找到目标章节"}
 
+        skill_text = await self._inject_skills("", task)
+
         async def llm_factory(level: str | None = None):
             return self.llm
 
@@ -35,7 +36,11 @@ class ChapterTextWorker(WorkerBase):
             db=self.db,
             llm_factory=llm_factory,
             project_id=project_id,
-            inputs={"chapter_id": chapter.get("id")},
+            inputs={
+                "chapter_id": chapter.get("id"),
+                "skill_text": skill_text,
+                "history_context": history_context or [],
+            },
         )
         result = await run_workflow(load_workflow_definition("chapter_generation"), ctx)
 
@@ -50,8 +55,17 @@ class ChapterTextWorker(WorkerBase):
         for key in ("generate_segments", "consistency_review", "rating_check"):
             notes.extend(result.outputs.get(key, {}).get("notes", []))
 
+        changes = []
+        for record in result.change_records:
+            changes.append({
+                "action": record.get("action", "update"),
+                "entity_id": record.get("entity_id"),
+                "entity_type": record.get("entity_type", "chapter"),
+                "fields": record.get("after") or {},
+            })
+
         return self._normalize_result({
-            "changes": result.change_records,
+            "changes": changes,
             "stage": "chapter_text",
             "notes": notes,
         })

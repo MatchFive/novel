@@ -78,6 +78,10 @@ async def generate_segments(ctx):
     context = ctx.outputs["context"]
     llm = await ctx.llm_factory("medium")
     system = chapter_text_prompt(context)
+    skill_text = ctx.inputs.get("skill_text") or ""
+    if skill_text:
+        system = skill_text + "\n\n" + system
+    history_context = ctx.inputs.get("history_context") or []
     target_words = context["target_words"]
     segments: list[str] = []
     notes: list[str] = []
@@ -91,10 +95,10 @@ async def generate_segments(ctx):
             target_words=target_words,
             prev_segment_tail=segments[-1][-300:] if segments else "",
         )
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
+        messages = [{"role": "system", "content": system}]
+        if history_context:
+            messages.extend(history_context)
+        messages.append({"role": "user", "content": user})
         try:
             seg = await llm.parse_llm_json(messages)
         except Exception as exc:
@@ -118,12 +122,19 @@ async def generate_segments(ctx):
 
 async def _rewrite_with_feedback(ctx, system, content, issues):
     llm = await ctx.llm_factory("medium")
+    skill_text = ctx.inputs.get("skill_text") or ""
+    if skill_text:
+        system = skill_text + "\n\n" + system
+    history_context = ctx.inputs.get("history_context") or []
     user = (
         "【当前正文】\n" + content
         + "\n\n【审校反馈】\n" + "\n".join(f"- {i}" for i in issues)
         + '\n\n请根据反馈修改并输出完整正文。只输出 JSON：{"text": "修改后的完整正文"}'
     )
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    messages = [{"role": "system", "content": system}]
+    if history_context:
+        messages.extend(history_context)
+    messages.append({"role": "user", "content": user})
     try:
         seg = await llm.parse_llm_json(messages)
         if isinstance(seg, dict) and seg.get("text"):
