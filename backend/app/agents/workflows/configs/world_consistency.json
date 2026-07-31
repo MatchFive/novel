@@ -1,0 +1,19 @@
+{
+  "name": "world_consistency",
+  "description": "检查世界观设定与现有章节/角色是否存在冲突",
+  "steps": [
+    {
+      "name": "load_data",
+      "fn": "world_consistency.load_data"
+    },
+    {
+      "name": "check",
+      "fn": "world_consistency.check",
+      "depends_on": ["load_data"]
+    }
+  ],
+  "input_schema": {},
+  "output_schema": {
+    "issues": "array"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "memory_update",
+  "description": "提取并可选应用章节角色记忆草稿",
+  "steps": [
+    {
+      "name": "extract",
+      "fn": "memory_update.extract_drafts"
+    },
+    {
+      "name": "build_changes",
+      "fn": "memory_update.build_change_records",
+      "depends_on": ["extract"]
+    },
+    {
+      "name": "apply",
+      "fn": "memory_update.apply_changes",
+      "depends_on": ["build_changes"],
+      "condition": "outputs.extract.drafts and inputs.auto_apply"
+    }
+  ],
+  "input_schema": {
+    "chapter_id": "string",
+    "auto_apply": "boolean"
+  },
+  "output_schema": {
+    "drafts": "array",
+    "applied": "object",
+    "change_records": "array"
+  }
+}

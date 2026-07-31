@@ -1,0 +1,37 @@
+{
+  "name": "chapter_generation",
+  "description": "为指定章节生成正文（分段写作 + 一致性审校 + 尺度检查）",
+  "steps": [
+    {
+      "name": "load_context",
+      "fn": "chapter_generation.load_context"
+    },
+    {
+      "name": "generate_segments",
+      "fn": "chapter_generation.generate_segments",
+      "depends_on": ["load_context"]
+    },
+    {
+      "name": "consistency_review",
+      "fn": "chapter_generation.consistency_review",
+      "depends_on": ["generate_segments"]
+    },
+    {
+      "name": "rating_check",
+      "fn": "chapter_generation.rating_check",
+      "depends_on": ["consistency_review"]
+    },
+    {
+      "name": "assemble_change",
+      "fn": "chapter_generation.assemble_change",
+      "depends_on": ["rating_check"]
+    }
+  ],
+  "input_schema": {
+    "chapter_id": "string"
+  },
+  "output_schema": {
+    "change_records": "array",
+    "notes": "array"
+  }
+}

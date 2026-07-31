@@ -1,0 +1,20 @@
+{
+  "name": "foreshadow_audit",
+  "description": "检查项目中未回收伏笔并给出更新建议",
+  "steps": [
+    {
+      "name": "load_data",
+      "fn": "foreshadow_audit.load_data"
+    },
+    {
+      "name": "audit",
+      "fn": "foreshadow_audit.audit",
+      "depends_on": ["load_data"]
+    }
+  ],
+  "input_schema": {},
+  "output_schema": {
+    "report": "array",
+    "change_records": "array"
+  }
+}
