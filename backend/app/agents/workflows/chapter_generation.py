@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 
 from app import repositories as repo
-from app.agents.harness.prompts.chapter_generation import (
-    chapter_rating_prompt,
-    chapter_review_prompt,
-    chapter_segment_user_prompt,
-    chapter_text_prompt,
-)
+from app.agents.harness.models import HarnessContext, Task
+from app.agents.harness.worker_base import _load_worker_metadata, run_worker
 from app.agents.harness.workers._chapter_utils import (
     active_foreshadows,
     assigned_plot_nodes,
@@ -22,7 +17,9 @@ from app.agents.harness.workers._chapter_utils import (
     previous_chapter_text_tail,
     volume_outline_text,
 )
+from app.agents.harness.workers.chapter_text_worker import ChapterTextWorker
 from app.agents.workflows.registry import register_step
+from app.config import settings
 from app.core.errors import NotFoundError
 
 logger = logging.getLogger(__name__)
@@ -67,6 +64,7 @@ async def load_context(ctx):
         "target_words": target_words,
         "rating": rating,
         "character_memories": await character_memories_for_chapter(ctx.db, chapter, characters),
+        "detailed_outline": chapter.get("detailed_outline", ""),
     }
     ctx.outputs["context"] = context
     return {"chapter_id": chapter_id}
@@ -75,130 +73,66 @@ async def load_context(ctx):
 @register_step
 async def generate_segments(ctx):
     context = ctx.outputs["context"]
-    llm = await ctx.llm_factory("medium")
-    system = chapter_text_prompt(context)
-    target_words = context["target_words"]
-    segments: list[str] = []
-    notes: list[str] = []
-    max_segments = max(target_words // 800 + 3, 10)
+    chapter_id = context["chapter_id"]
+    chapter = context["chapter"]
+    order = chapter.get("order", 0) + 1
 
-    for i in range(1, max_segments + 1):
-        accumulated = sum(len(s) for s in segments)
-        user = chapter_segment_user_prompt(
-            segment_index=i,
-            accumulated_words=accumulated,
-            target_words=target_words,
-            prev_segment_tail=segments[-1][-300:] if segments else "",
-        )
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
-        try:
-            seg = await llm.parse_llm_json(messages)
-        except Exception as exc:
-            notes.append(f"第 {i} 段调用失败：{exc}")
-            break
-        if not isinstance(seg, dict):
-            notes.append(f"第 {i} 段返回格式异常")
-            break
-        text = str(seg.get("text") or "").strip()
-        if not text:
-            break
-        segments.append(text)
-        if seg.get("finished"):
-            break
-
-    content = "\n\n".join(segments)
-    if not content:
-        raise RuntimeError("正文生成失败")
-    return {"content": content, "notes": notes}
-
-
-async def _rewrite_with_feedback(ctx, system, content, issues):
-    llm = await ctx.llm_factory("medium")
-    user = (
-        "【当前正文】\n" + content
-        + "\n\n【审校反馈】\n" + "\n".join(f"- {i}" for i in issues)
-        + '\n\n请根据反馈修改并输出完整正文。只输出 JSON：{"text": "修改后的完整正文"}'
+    task = Task(
+        id=f"chapter_text_{chapter_id}",
+        worker="chapter_text",
+        goal=f"生成第 {order} 章正文",
     )
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    try:
-        seg = await llm.parse_llm_json(messages)
-        if isinstance(seg, dict) and seg.get("text"):
-            return str(seg["text"]).strip()
-    except Exception:
-        logger.exception("Rewrite with feedback failed")
-    return None
+
+    harness_ctx = HarnessContext(
+        project_id=ctx.project_id,
+        session_context={"entity_type": "chapter", "entity_id": chapter_id},
+        entities={
+            "characters": context.get("characters", []),
+            "world": context.get("world", []),
+            "foreshadows": context.get("foreshadows", []),
+        },
+    )
+
+    metadata = _load_worker_metadata(ChapterTextWorker)
+    llm = await ctx.llm_factory(metadata.model_level)
+    recursive_limit = ctx.inputs.get("recursive_limit", settings.recursive_limit_default)
+
+    result = await run_worker(
+        ChapterTextWorker,
+        ctx.db,
+        llm,
+        recursive_limit,
+        task,
+        harness_ctx,
+        metadata=metadata,
+    )
+
+    if result.get("error"):
+        raise RuntimeError(f"章节正文生成失败：{result['error']}")
+
+    changes = result.get("changes") or []
+    if not changes:
+        raise RuntimeError("章节正文生成失败：worker 未返回任何变更")
+
+    content = (changes[0].get("fields") or {}).get("content")
+    if not content:
+        raise RuntimeError("章节正文生成失败：worker 返回的变更缺少 content")
+
+    return {"content": content, "notes": result.get("notes", [])}
 
 
 @register_step
 async def consistency_review(ctx):
-    context = ctx.outputs["context"]
-    llm = await ctx.llm_factory("medium")
+    """一致性审校已在 ChapterTextWorker 中完成；此步骤仅透传结果。"""
     content = ctx.outputs["generate_segments"]["content"]
-    system = chapter_review_prompt({
-        "chapter_text": content,
-        "chapter": context["chapter"],
-        "characters": context["characters"],
-        "world": context["world"],
-        "active_foreshadows": context["active_foreshadows"],
-        "previous_chapter_text_tail": context["previous_chapter_text_tail"],
-    })
-    notes: list[str] = []
-    for attempt in range(5):
-        try:
-            raw = await llm.parse_llm_json([{"role": "system", "content": system}])
-        except Exception:
-            break
-        if isinstance(raw, dict) and raw.get("ok"):
-            notes.append(f"一致性审校通过（第 {attempt + 1} 次）")
-            break
-        issues = raw.get("issues") if isinstance(raw, dict) else []
-        if not issues:
-            break
-        rewritten = await _rewrite_with_feedback(ctx, system, content, [str(i) for i in issues])
-        if rewritten:
-            content = rewritten
-            notes.append(f"第 {attempt + 1} 次审校发现 {len(issues)} 处问题并已修正")
-        else:
-            notes.append(f"第 {attempt + 1} 次审校发现 {len(issues)} 处问题但重写失败，已保留原文")
-            break
-    else:
-        notes.append("一致性审校已达最大循环次数（5 次），仍可能存在未解决问题")
-
-    ctx.outputs["consistency_review"] = {"content": content, "notes": notes}
-    return {"content": content, "notes": notes}
+    return {"content": content, "notes": []}
 
 
 @register_step
 async def rating_check(ctx):
-    context = ctx.outputs["context"]
-    llm = await ctx.llm_factory("medium")
+    """尺度检查已在 ChapterTextWorker 中完成；此步骤仅透传结果。"""
     content = ctx.outputs["consistency_review"]["content"]
-    system = chapter_rating_prompt({"chapter_text": content, "rating": context["rating"]})
-    notes: list[str] = []
-    try:
-        raw = await llm.parse_llm_json([{"role": "system", "content": system}])
-        if isinstance(raw, dict) and raw.get("ok"):
-            notes.append("尺度检查通过")
-        else:
-            issues = raw.get("issues") if isinstance(raw, dict) else []
-            if issues:
-                rewritten = await _rewrite_with_feedback(
-                    ctx,
-                    chapter_text_prompt(context),
-                    content,
-                    [json.dumps(i, ensure_ascii=False) if isinstance(i, dict) else str(i) for i in issues],
-                )
-                if rewritten:
-                    content = rewritten
-                    notes.append(f"已按尺度等级自动调整 {len(issues)} 处")
-                else:
-                    notes.append(f"尺度检查发现 {len(issues)} 处问题但改写失败")
-    except Exception:
-        logger.exception("Rating check failed")
-    return {"content": content, "notes": notes}
+    return {"content": content, "notes": []}
 
 
 @register_step
