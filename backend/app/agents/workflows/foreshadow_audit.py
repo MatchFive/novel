@@ -17,7 +17,7 @@ FORESHADOW_AUDIT_PROMPT = """你是小说伏笔审计员。请检查以下未回
     {"foreshadow_id": "...", "suggestion": "...", "proposed_state": "pending|revealed|abandoned"}
   ],
   "change_records": [
-    {"action": "update", "entity_id": "...", "fields": {"state": "revealed"}}
+    {"action": "update", "entity_id": "...", "after": {"state": "revealed"}}
   ]
 }"""
 
@@ -61,10 +61,11 @@ async def audit(ctx):
             continue
         rec.setdefault("id", f"cr_{uuid.uuid4().hex[:12]}")
         rec.setdefault("project_id", ctx.project_id)
+        rec.setdefault("action", "update")
         rec.setdefault("entity_type", "foreshadow")
         rec.setdefault("requires_confirmation", True)
-        fields = rec.setdefault("fields", {})
-        if fields.get("state") not in {"pending", "revealed", "abandoned"}:
-            fields["state"] = "pending"
+        after = rec.setdefault("after", {})
+        if after.get("state") not in {"pending", "revealed", "abandoned"}:
+            after["state"] = "pending"
         ctx.change_records.append(rec)
     return {"report": report, "messages": [f"审计完成，发现 {len(report)} 条建议"]}
