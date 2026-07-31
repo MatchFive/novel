@@ -21,12 +21,13 @@ async def load_data(ctx):
     world = await repo.list_world(ctx.db, project_id)
     characters = await repo.list_characters(ctx.db, project_id)
     chapters = await repo.list_chapters(ctx.db, project_id)
-    ctx.outputs["load_data"] = {
+    return {
         "world": world,
         "characters": characters,
         "chapters": chapters,
+        "world_count": len(world),
+        "chapter_count": len(chapters),
     }
-    return {"world_count": len(world), "chapter_count": len(chapters)}
 
 
 @register_step
