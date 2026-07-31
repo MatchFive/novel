@@ -25,6 +25,7 @@ def _register_routers(app: FastAPI) -> None:
     from app.api import projects, settings as settings_api
     from app.api import long_outline, long_character, long_foreshadow, long_world, long_plot, long_chapter
     from app.api import assistant, long_continue, long_memory, export, graph, log as log_api
+    from app.api import workflows
     app.include_router(projects.router, prefix="/api/projects")
     app.include_router(settings_api.router, prefix="/api/settings")
     app.include_router(long_outline.router, prefix="/api/long")
@@ -39,6 +40,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(export.router, prefix="/api/export")
     app.include_router(graph.router, prefix="/api/graph")
     app.include_router(log_api.router, prefix="/api/log")
+    app.include_router(workflows.router)
 
 
 def _mount_spa(app: FastAPI) -> None:
