@@ -40,7 +40,7 @@ def _register_routers(app: FastAPI) -> None:
     app.include_router(export.router, prefix="/api/export")
     app.include_router(graph.router, prefix="/api/graph")
     app.include_router(log_api.router, prefix="/api/log")
-    app.include_router(workflows.router)
+    app.include_router(workflows.router, prefix="/api")
 
 
 def _mount_spa(app: FastAPI) -> None:

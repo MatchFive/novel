@@ -100,7 +100,7 @@ async def generate_chapter_workflow(
         db=db,
         llm_factory=llm_factory,
         project_id=project_id,
-        inputs=body,
+        inputs=body or {},
     )
     result = await run_workflow(load_workflow_definition("chapter_generation"), ctx)
     sess = await _stage_records(db, project_id, result.change_records)
