@@ -15,6 +15,7 @@ from app.core.errors import AppError, NotFoundError
 from app.models import (
     AssistantSession, LongChangeRecord, LongCharacter, LongOutline,
     LongForeshadow, LongWorldSetting, LongPlotNode, LongChapter,
+    LongCharacterMemory,
 )
 from app.graph.client import get_graph
 
@@ -29,6 +30,7 @@ _ENTITY_REPO = {
     "world": (repo.get_world, repo.create_world, repo.update_world, repo.delete_world),
     "plot": (repo.get_plot, repo.create_plot, repo.update_plot, repo.delete_plot),
     "chapter": (repo.get_chapter, repo.create_chapter, repo.update_chapter, repo.delete_chapter),
+    "memory": (repo.get_character_memory, repo.create_character_memory, repo.update_character_memory, repo.delete_character_memory),
 }
 
 
@@ -39,6 +41,7 @@ _ENTITY_MODELS = {
     "world": LongWorldSetting,
     "plot": LongPlotNode,
     "chapter": LongChapter,
+    "memory": LongCharacterMemory,
 }
 
 
