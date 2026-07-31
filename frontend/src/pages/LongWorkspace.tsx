@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { longApi } from "@/api/long";
 import { graphApi } from "@/api/graph";
 import { assistantApi } from "@/api/assistant";
+import { workflowApi } from "@/api/workflow";
 import { useAssistantSession } from "@/stores/useAssistantSession";
 import { useConfirm } from "@/hooks/useConfirm";
 import { ChapterList } from "@/components/chapter/ChapterList";
@@ -122,6 +123,8 @@ function ChapterPanel({ pid }: { pid: string }) {
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [undoable, setUndoable] = useState(false);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [workflowMessage, setWorkflowMessage] = useState<string | null>(null);
   const generating = useAssistantSession((s) => s.busy);
   const chaptersVersion = useAssistantSession((s) => s.chaptersVersion);
   const entitiesVersion = useAssistantSession((s) => s.entitiesVersion);
@@ -287,9 +290,70 @@ function ChapterPanel({ pid }: { pid: string }) {
     setUndoable(false);
   };
 
+  const runWorkflow = async (label: string, fn: () => Promise<any>, refreshAssistant = false) => {
+    setWorkflowBusy(true);
+    setWorkflowMessage(null);
+    try {
+      const { data } = await fn();
+      const messages = data?.result?.messages || [];
+      setWorkflowMessage(messages[0] || `${label}完成`);
+      if (refreshAssistant && data?.session_id) {
+        await useAssistantSession.getState().loadHistory(pid);
+        useAssistantSession.getState().openAssistant();
+      }
+      if (label === "生成本章正文") {
+        await loadItems();
+        if (selectedId) await loadDetail(selectedId);
+      }
+    } catch (err) {
+      setWorkflowMessage(err instanceof Error ? err.message : `${label}失败`);
+    } finally {
+      setWorkflowBusy(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       {dialog}
+      <div className="mb-3 flex flex-wrap gap-2">
+        <Button
+          variant="subtle"
+          disabled={!selectedId || workflowBusy}
+          onClick={() => runWorkflow("提取本章记忆", () => workflowApi.extractMemory(selectedId!))}
+        >
+          提取本章记忆
+        </Button>
+        <Button
+          variant="subtle"
+          disabled={!selectedId || workflowBusy}
+          onClick={() =>
+            runWorkflow(
+              "生成本章正文",
+              () => workflowApi.generateChapter(pid, selectedId!),
+              true,
+            )
+          }
+        >
+          生成本章正文
+        </Button>
+        <Button
+          variant="subtle"
+          disabled={workflowBusy}
+          onClick={() => runWorkflow("检查伏笔", () => workflowApi.auditForeshadows(pid), true)}
+        >
+          检查伏笔
+        </Button>
+        <Button
+          variant="subtle"
+          disabled={workflowBusy}
+          onClick={() => runWorkflow("世界观一致性", () => workflowApi.checkWorldConsistency(pid))}
+        >
+          世界观一致性
+        </Button>
+      </div>
+      {workflowMessage && (
+        <div className="mb-3 text-sm text-muted">{workflowMessage}</div>
+      )}
       <SectionTitle>章节</SectionTitle>
       <div className="mt-4 flex h-0 flex-1 gap-4">
         <div className="flex w-64 flex-col overflow-hidden border border-line bg-surface">
