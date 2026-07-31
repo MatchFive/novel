@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import logging
 
 from app.agents.workflows.executor import run_workflow
@@ -27,7 +28,8 @@ _BUILT_IN_STEP_MODULES = (
 )
 
 for _module_name in _BUILT_IN_STEP_MODULES:
-    try:
-        __import__(f"app.agents.workflows.{_module_name}")
-    except ImportError:
+    _module_full_name = f"app.agents.workflows.{_module_name}"
+    if importlib.util.find_spec(_module_full_name) is None:
         logger.debug("Built-in workflow step module %r is not available yet", _module_name)
+        continue
+    importlib.import_module(_module_full_name)
