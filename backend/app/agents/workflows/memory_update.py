@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import uuid
 
 from app import repositories as repo
 from app.agents.workflows.registry import register_step
 from app.core.errors import AppError
 from app.services.change_apply import apply_change
-from app.services.character_memory import (
-    _content_hash,
-    extract_memory_drafts,
-)
+from app.services.character_memory import extract_memory_drafts
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +33,11 @@ async def build_change_records(ctx):
     for draft in drafts:
         action = draft.get("action", "add")
         record = {
-            "entity_type": "memory",
+            "id": f"cr_{uuid.uuid4().hex[:12]}",
+            "project_id": ctx.project_id,
             "action": action,
+            "entity_type": "memory",
+            "requires_confirmation": True,
             "after": {
                 "character_id": draft.get("character_id"),
                 "content": draft.get("content"),
@@ -110,7 +112,7 @@ async def apply_changes(ctx):
         }
 
     chapter = await repo.get_chapter(ctx.db, ctx.chapter_id)
-    content_hash = _content_hash(chapter.get("content") or "") if chapter else ""
+    content_hash = hashlib.sha256((chapter.get("content") or "").encode("utf-8")).hexdigest()[:16] if chapter else ""
     await repo.clear_character_memory_drafts(ctx.db, ctx.chapter_id)
     await repo.set_chapter_memory_extraction(
         ctx.db, ctx.chapter_id, content_hash, created + updated

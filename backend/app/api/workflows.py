@@ -74,8 +74,10 @@ async def run_memory_workflow(
         inputs=body or {},
     )
     result = await run_workflow(load_workflow_definition("memory_update"), ctx)
+    sess = await _stage_records(db, project_id, result.change_records)
     return {
         "ok": True,
+        "session_id": sess.id,
         "result": result.model_dump(exclude={"outputs"}),
     }
 
@@ -135,7 +137,7 @@ async def audit_foreshadows_workflow(
     return {
         "ok": True,
         "session_id": sess.id,
-        "result": result.model_dump(exclude={"outputs"}),
+        "result": result.model_dump(),
     }
 
 
@@ -161,5 +163,5 @@ async def check_world_workflow(
     result = await run_workflow(load_workflow_definition("world_consistency"), ctx)
     return {
         "ok": True,
-        "result": result.model_dump(exclude={"outputs"}),
+        "result": result.model_dump(),
     }

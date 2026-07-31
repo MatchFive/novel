@@ -319,7 +319,13 @@ function ChapterPanel({ pid }: { pid: string }) {
         <Button
           variant="subtle"
           disabled={!selectedId || workflowBusy}
-          onClick={() => runWorkflow("提取本章记忆", () => workflowApi.extractMemory(selectedId!))}
+          onClick={() =>
+            runWorkflow(
+              "提取本章记忆",
+              () => workflowApi.extractMemory(selectedId!),
+              true,
+            )
+          }
         >
           提取本章记忆
         </Button>

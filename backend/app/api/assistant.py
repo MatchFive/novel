@@ -143,6 +143,8 @@ async def _store_reflection(
         dimension=dimension,
     ))
     await db.commit()
+
+
 def _decode_project_id(project_id: str | None) -> str | None:
     """把前端 sentinel 'global' 转成 None，表示全局会话。"""
     if project_id is None or project_id == "global":
