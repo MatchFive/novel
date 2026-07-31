@@ -1,84 +1,90 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
-from app.agents.workflows.models import WorkflowContext, WorkflowDefinition, WorkflowRunResult
+from app.agents.workflows.models import (
+    WorkflowContext,
+    WorkflowDefinition,
+    WorkflowRunResult,
+    WorkflowStep,
+)
 from app.agents.workflows.registry import get_step
 
 logger = logging.getLogger(__name__)
 
 
-def _eval_condition(condition: str, context: WorkflowContext) -> bool:
-    """Evaluate a simple workflow condition against inputs/outputs.
-
-    Conditions are expected to be simple boolean expressions referencing
-    ``inputs`` and ``outputs`` (e.g. ``outputs.extract.drafts``).
-    """
-    namespace: dict[str, Any] = {
-        "inputs": context.inputs,
-        "outputs": context.outputs,
-    }
-    try:
-        # Restrict builtins to avoid arbitrary code execution.
-        return bool(eval(condition, {"__builtins__": {}}, namespace))  # noqa: S307
-    except Exception as exc:  # pragma: no cover
-        logger.warning("Condition %r evaluation failed: %s", condition, exc)
-        return False
-
-
-def _topological_sort(steps: list[Any]) -> list[Any]:
-    """Return steps ordered by dependencies."""
-    by_name = {step.name: step for step in steps}
+def _topological_sort(steps: list[WorkflowStep]) -> list[WorkflowStep]:
+    by_name = {s.name: s for s in steps}
     visited: set[str] = set()
-    order: list[Any] = []
+    order: list[WorkflowStep] = []
 
     def visit(name: str) -> None:
         if name in visited:
             return
-        step = by_name[name]
-        for dep in step.depends_on:
-            visit(dep)
         visited.add(name)
-        order.append(step)
+        for dep in by_name[name].depends_on:
+            visit(dep)
+        order.append(by_name[name])
 
     for step in steps:
         visit(step.name)
     return order
 
 
+def _eval_condition(condition: str | None, ctx: WorkflowContext) -> bool:
+    if not condition:
+        return True
+    try:
+        return bool(
+            eval(condition, {"__builtins__": {}}, {"inputs": ctx.inputs, "outputs": ctx.outputs})
+        )
+    except Exception:
+        logger.warning("Workflow condition eval failed: %s", condition)
+        return False
+
+
 async def run_workflow(
-    definition: WorkflowDefinition, context: WorkflowContext
+    definition: WorkflowDefinition,
+    ctx: WorkflowContext,
 ) -> WorkflowRunResult:
-    """Execute a workflow definition against the provided context."""
-    status = "completed"
+    messages: list[str] = []
+    completed: set[str] = set()
+    failed: set[str] = set()
 
     for step in _topological_sort(definition.steps):
-        if step.condition and not _eval_condition(step.condition, context):
-            logger.info("Skipping step %s due to condition %r", step.name, step.condition)
+        if step.name in completed or step.name in failed:
+            continue
+        if any(dep in failed for dep in step.depends_on):
+            failed.add(step.name)
+            messages.append(f"跳过 {step.name}：上游步骤失败")
+            continue
+        if not _eval_condition(step.condition, ctx):
+            messages.append(f"跳过 {step.name}：条件不满足")
             continue
 
         fn = get_step(step.fn)
         try:
-            result = await fn(context)
-        except Exception as exc:  # pragma: no cover
+            out = await fn(ctx)
+        except Exception as exc:
             logger.exception("Workflow step %s failed", step.name)
-            status = "failed"
-            context.messages.append(f"Step {step.name} failed: {exc}")
-            break
+            failed.add(step.name)
+            messages.append(f"{step.name} 失败：{exc}")
+            continue
 
-        if not isinstance(result, dict):
-            result = {"result": result}
+        ctx.outputs[step.name] = out if isinstance(out, dict) else {"value": out}
+        completed.add(step.name)
+        if isinstance(out, dict):
+            ctx.change_records.extend(out.get("change_records") or [])
+            messages.extend(out.get("messages") or [])
 
-        context.outputs[step.name] = result
-        context.change_records.extend(result.get("change_records", []))
-        context.messages.extend(result.get("messages", []))
+    status = "completed"
+    if failed:
+        status = "failed" if not completed else "partial"
 
     return WorkflowRunResult(
         workflow_name=definition.name,
         status=status,
-        outputs=context.outputs,
-        change_records=context.change_records,
-        messages=context.messages,
-        session_id=None,
+        outputs=ctx.outputs,
+        change_records=ctx.change_records,
+        messages=messages,
     )
