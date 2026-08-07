@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import NotFoundError
 from app.database import get_db
-from app.models import Project
+from app.models import Project, UserSetting
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectOut
 
 router = APIRouter(tags=["projects"])
@@ -27,16 +27,17 @@ async def list_projects(
 
 @router.post("", response_model=ProjectOut)
 async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_db)):
-    from app.models import UserSetting
-
     p = Project(type=payload.type, title=payload.title, description=payload.description)
     res = await db.execute(select(UserSetting))
     s = res.scalars().first()
     if s:
-        p.generation_config = {
-            "chapter_target_words": s.chapter_target_words,
-            "content_rating": s.content_rating,
-        }
+        cfg: dict = {}
+        if s.chapter_target_words is not None:
+            cfg["chapter_target_words"] = s.chapter_target_words
+        if s.content_rating is not None:
+            cfg["content_rating"] = s.content_rating
+        if cfg:
+            p.generation_config = cfg
     db.add(p)
     await db.commit()
     await db.refresh(p)

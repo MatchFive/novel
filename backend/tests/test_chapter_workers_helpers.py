@@ -1,10 +1,15 @@
 """章节生成 helper 纯函数测试。"""
 from __future__ import annotations
 
+import pytest
+
 from app.agents.harness.workers._chapter_utils import (
     chapter_summaries_chain,
+    generation_settings,
     volume_outline_text,
 )
+from app.database import AsyncSessionLocal, create_all, engine
+from app.models import Project, UserSetting
 
 
 def _ch(order, title, outline="", content=""):
@@ -73,3 +78,84 @@ def test_volume_outline_text_skips_volume_without_range():
     result = volume_outline_text(outlines, 0)
     assert "未找到本卷大纲" in result
     assert "开荒期" in result
+
+
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.fixture
+async def setup_db():
+    await create_all()
+    yield
+
+
+@pytest.fixture
+async def cleanup_tables(setup_db):
+    yield
+    async with engine.begin() as conn:
+        for table in ("projects", "user_settings"):
+            try:
+                await conn.exec_driver_sql(f"DELETE FROM {table};")
+            except Exception:
+                pass
+
+
+@pytest.mark.anyio
+async def test_generation_settings_uses_project_config(setup_db, cleanup_tables):
+    async with AsyncSessionLocal() as db:
+        s = UserSetting(content_rating="strict", chapter_target_words=1500)
+        db.add(s)
+        p = Project(
+            type="long",
+            title="t",
+            generation_config={"chapter_target_words": 3000, "content_rating": "loose"},
+        )
+        db.add(p)
+        await db.commit()
+        await db.refresh(p)
+
+        target, rating = await generation_settings(db, p.id)
+        assert target == 3000
+        assert rating == "loose"
+
+
+@pytest.mark.anyio
+async def test_generation_settings_falls_back_to_user_setting(setup_db, cleanup_tables):
+    async with AsyncSessionLocal() as db:
+        s = UserSetting(content_rating="strict", chapter_target_words=1500)
+        db.add(s)
+        p = Project(type="long", title="t", generation_config={})
+        db.add(p)
+        await db.commit()
+        await db.refresh(p)
+
+        target, rating = await generation_settings(db, p.id)
+        assert target == 1500
+        assert rating == "strict"
+
+
+@pytest.mark.anyio
+async def test_generation_settings_falls_back_to_defaults(setup_db, cleanup_tables):
+    async with AsyncSessionLocal() as db:
+        p = Project(type="long", title="t", generation_config={})
+        db.add(p)
+        await db.commit()
+        await db.refresh(p)
+
+        target, rating = await generation_settings(db, p.id)
+        assert target == 2500
+        assert rating == "standard"
+
+
+@pytest.mark.anyio
+async def test_generation_settings_without_project_id_uses_user_setting(setup_db, cleanup_tables):
+    async with AsyncSessionLocal() as db:
+        s = UserSetting(content_rating="loose", chapter_target_words=4000)
+        db.add(s)
+        await db.commit()
+
+        target, rating = await generation_settings(db)
+        assert target == 4000
+        assert rating == "loose"

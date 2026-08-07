@@ -8,11 +8,12 @@ from app.agents.workflows.models import WorkflowContext
 class TestChapterGenerationWorkflow(unittest.IsolatedAsyncioTestCase):
     async def test_load_context(self):
         ctx = WorkflowContext(
-            db=MagicMock(),
+            db=AsyncMock(),
             llm_factory=AsyncMock(),
             project_id="p1",
             inputs={"chapter_id": "c1"},
         )
+        ctx.db.get = AsyncMock(return_value=None)
         with patch("app.agents.workflows.chapter_generation.repo.get_chapter", new=AsyncMock(return_value={"id": "c1", "order": 0})) as m_chapter, \
              patch("app.agents.workflows.chapter_generation.repo.list_chapters", new=AsyncMock(return_value=[])) as m_chapters, \
              patch("app.agents.workflows.chapter_generation.repo.list_outlines", new=AsyncMock(return_value=[])) as m_outlines, \
@@ -25,6 +26,7 @@ class TestChapterGenerationWorkflow(unittest.IsolatedAsyncioTestCase):
             out = await load_context(ctx)
         self.assertEqual(out["chapter_id"], "c1")
         m_chapter.assert_awaited_once()
+        m_settings.assert_awaited_once_with(ctx.db, "p1")
 
 
 if __name__ == "__main__":
