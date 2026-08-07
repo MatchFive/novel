@@ -134,14 +134,41 @@ async def delete_model(model_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
+@router.get("/models/fetch")
+async def fetch_provider_models(base_url: str, api_key: str = ""):
+    url = base_url.rstrip("/") + "/models"
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            models = [item.get("id") or item.get("model") for item in data.get("data", [])]
+            return {"ok": True, "models": [m for m in models if m]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @router.post("/models/test")
 async def test_model(payload: ModelConfigTest):
+    if payload.kind == "embedding":
+        client = LLMClient(base_url=payload.base_url, api_key=payload.api_key, model=payload.model)
+        try:
+            vectors = await client.embed(["ping"])
+            dim = len(vectors[0]) if vectors and vectors[0] else 0
+            expected = payload.embedding_dimension or dim
+            if expected and dim != expected:
+                return {"ok": False, "error": f"维度不匹配：返回 {dim}，预期 {expected}"}
+            return {"ok": True, "dimension": dim}
+        except httpx.HTTPError as e:
+            return {"ok": False, "error": str(e)}
+
     client = LLMClient(base_url=payload.base_url, api_key=payload.api_key, model=payload.model)
     try:
         resp = await client.chat(
             [{"role": "user", "content": "ping"}],
             timeout=15,
         )
-        return {"ok": True, "reply": (resp or "")[:200]}
+        return {"ok": True, "reply": (resp or "").strip()[:200]}
     except httpx.HTTPError as e:
         return {"ok": False, "error": str(e)}
