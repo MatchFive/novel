@@ -29,6 +29,7 @@ async def get_llm_client(db: AsyncSession, level: str | None = None) -> LLMClien
             base_url=cfg.base_url or None,
             api_key=cfg.api_key or None,
             model=cfg.model or None,
+            temperature=cfg.temperature if cfg.temperature is not None else None,
         )
     return LLMClient()
 
