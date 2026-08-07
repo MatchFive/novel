@@ -1,8 +1,23 @@
+export interface WritingStyle {
+  perspective?: string;
+  language_style?: string;
+  pace?: string;
+  tone?: string;
+  custom_note?: string;
+}
+
+export interface GenerationConfig {
+  chapter_target_words?: number;
+  content_rating?: string;
+}
+
 export interface Project {
   id: string;
   type: "long";
   title: string;
   description: string;
+  writing_style?: WritingStyle;
+  generation_config?: GenerationConfig;
   created_at: string | null;
   updated_at: string | null;
 }

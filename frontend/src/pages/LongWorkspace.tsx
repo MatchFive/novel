@@ -2,26 +2,36 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { longApi } from "@/api/long";
 import { graphApi } from "@/api/graph";
+import { projectsApi } from "@/api/projects";
 import { assistantApi } from "@/api/assistant";
 import { workflowApi } from "@/api/workflow";
 import { useAssistantSession } from "@/stores/useAssistantSession";
 import { useConfirm } from "@/hooks/useConfirm";
+import ProjectSettingsDialog from "@/components/project/ProjectSettingsDialog";
 import { ChapterList } from "@/components/chapter/ChapterList";
 import { ChapterEditor } from "@/components/chapter/ChapterEditor";
 import { EntityWorkbench, type EntityWorkbenchConfig } from "@/components/EntityWorkbench";
 import { OutlinePanel } from "@/components/OutlinePanel";
 import { Button, Card, SectionTitle } from "@/components/ui";
-import type { Chapter } from "@/types";
+import type { Chapter, Project } from "@/types";
 
 export default function LongWorkspace() {
   const { id } = useParams();
   const nav = useNavigate();
   const [tab, setTab] = useState("outline");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [project, setProject] = useState<Project | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    projectsApi.get(id).then((r) => setProject(r.data));
+  }, [id]);
 
   return (
     <div className="flex h-full">
       <aside className="w-52 shrink-0 border-r border-line bg-surface p-4">
         <Button variant="subtle" className="mb-4 w-full justify-start" onClick={() => nav("/")}>← 返回</Button>
+        <Button variant="subtle" className="mb-4 w-full justify-start" onClick={() => setSettingsOpen(true)}>⚙ 项目设置</Button>
         {[
           ["outline", "大纲树"], ["character", "角色"], ["foreshadow", "伏笔"],
           ["world", "世界观"], ["plot", "剧情节点"], ["chapter", "章节"], ["graph", "图谱"],
@@ -46,6 +56,14 @@ export default function LongWorkspace() {
         {tab === "chapter" && <ChapterPanel pid={id!} />}
         {tab === "graph" && <GraphPanel pid={id!} />}
       </div>
+      {project && (
+        <ProjectSettingsDialog
+          project={project}
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={setProject}
+        />
+      )}
     </div>
   );
 }
