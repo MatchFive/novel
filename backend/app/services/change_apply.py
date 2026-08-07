@@ -208,6 +208,12 @@ async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
     entity_id = change.get("entity_id")
     after = change.get("after") or {}
 
+    # patch 控制字段不是模型字段，会在 _sanitize_fields 中被过滤，
+    # 因此先提取到局部变量供后续分支使用。
+    patch_search = after.get("search")
+    patch_replace = after.get("replace")
+    patch_field = after.get("field", "content")
+
     repo_tuple = _ENTITY_REPO.get(entity_type)
     if not repo_tuple:
         raise AppError(f"未知实体类型：{entity_type}", "UNKNOWN_ENTITY", 400)
@@ -265,6 +271,7 @@ async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
             existing = await get_fn(db, entity_id)
             if not existing:
                 raise NotFoundError("待更新实体不存在")
+            existing_dict = existing if isinstance(existing, dict) else _row_snapshot(existing)
             # 过滤掉 None 值，只更新显式字段
             merged = {k: v for k, v in after.items() if v is not None}
             row = await update_fn(db, entity_id, merged)
@@ -278,9 +285,10 @@ async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
             existing = await get_fn(db, entity_id)
             if not existing:
                 raise NotFoundError("待追加实体不存在")
+            existing_dict = existing if isinstance(existing, dict) else _row_snapshot(existing)
             merged = {}
             for k, v in after.items():
-                old = existing.get(k)
+                old = existing_dict.get(k)
                 if isinstance(old, str) and isinstance(v, str):
                     merged[k] = old + v
                 else:
@@ -296,12 +304,13 @@ async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
             existing = await get_fn(db, entity_id)
             if not existing:
                 raise NotFoundError("待补丁实体不存在")
-            search = after.get("search")
-            replace = after.get("replace")
-            field = after.get("field", "content")
+            existing_dict = existing if isinstance(existing, dict) else _row_snapshot(existing)
+            search = patch_search
+            replace = patch_replace
+            field = patch_field
             if not isinstance(search, str) or not isinstance(replace, str):
                 raise AppError("patch 必须提供 search/replace 字符串", "BAD_CHANGE", 400)
-            old_value = existing.get(field, "")
+            old_value = existing_dict.get(field, "")
             if not isinstance(old_value, str):
                 raise AppError(f"patch 字段 {field} 不是文本", "BAD_CHANGE", 400)
             count = old_value.count(search)
