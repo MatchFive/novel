@@ -480,7 +480,7 @@ def chapter_outline_prompt(context: dict) -> str:
 
 def chapter_text_prompt(context: dict) -> str:
     """根据 context 生成章节正文的 prompt。"""
-    return CHAPTER_TEXT_PROMPT(
+    prompt = CHAPTER_TEXT_PROMPT(
         chapter=context["chapter"],
         detailed_outline=context.get("detailed_outline", "") or "（无）",
         assigned_plot_nodes=context.get("assigned_plot_nodes") or [],
@@ -493,6 +493,21 @@ def chapter_text_prompt(context: dict) -> str:
         volume_outline=context.get("volume_outline", "") or "（暂无卷大纲）",
         character_memories=context.get("character_memories") or {},
     )
+    style = context.get("writing_style") or {}
+    if any(style.values()):
+        parts = []
+        if style.get("perspective"):
+            parts.append(f"叙事视角：{style['perspective']}。")
+        if style.get("language_style"):
+            parts.append(f"语言风格：{style['language_style']}。")
+        if style.get("pace"):
+            parts.append(f"节奏：{style['pace']}。")
+        if style.get("tone"):
+            parts.append(f"情感基调：{style['tone']}。")
+        if style.get("custom_note"):
+            parts.append(f"补充：{style['custom_note']}")
+        prompt += "\n\n【文风要求】\n" + "".join(parts)
+    return prompt
 
 
 def chapter_review_prompt(context: dict) -> str:

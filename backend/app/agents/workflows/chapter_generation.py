@@ -5,6 +5,7 @@ import logging
 import uuid
 
 from app import repositories as repo
+from app.models import Project
 from app.agents.harness.prompts.chapter_generation import (
     chapter_rating_prompt,
     chapter_review_prompt,
@@ -47,6 +48,9 @@ async def load_context(ctx):
     foreshadows = await repo.list_foreshadows(ctx.db, project_id)
     target_words, rating = await generation_settings(ctx.db)
 
+    project = await ctx.db.get(Project, project_id)
+    writing_style = (project.writing_style or {}) if project else {}
+
     prev = previous_chapter(chapter, chapters)
     context = {
         "chapter_id": chapter_id,
@@ -68,6 +72,7 @@ async def load_context(ctx):
         "rating": rating,
         "character_memories": await character_memories_for_chapter(ctx.db, chapter, characters),
         "detailed_outline": chapter.get("detailed_outline", ""),
+        "writing_style": writing_style,
     }
     ctx.outputs["context"] = context
     return {"chapter_id": chapter_id}
