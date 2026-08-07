@@ -67,6 +67,7 @@ class ModelConfig(Base):
     level = Column(String(32), nullable=True, index=True)
     embedding_model = Column(String(128), nullable=True)
     embedding_dimension = Column(Integer, default=1536)
+    temperature = Column(Float, nullable=True)
     is_default = Column(Boolean, default=False)
 
     def to_dict(self, hide_key: bool = True) -> dict:
@@ -78,6 +79,7 @@ class ModelConfig(Base):
             "level": self.level,
             "embedding_model": self.embedding_model,
             "embedding_dimension": self.embedding_dimension,
+            "temperature": self.temperature,
             "is_default": self.is_default,
             **({} if hide_key else {"api_key": self.api_key}),
         }

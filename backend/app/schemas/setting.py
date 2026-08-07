@@ -11,6 +11,7 @@ class ModelConfigCreate(BaseModel):
     level: Optional[str] = None
     embedding_model: Optional[str] = None
     embedding_dimension: Optional[int] = None
+    temperature: Optional[float] = None
     is_default: bool = False
 
 
@@ -22,6 +23,7 @@ class ModelConfigUpdate(BaseModel):
     level: Optional[str] = None
     embedding_model: Optional[str] = None
     embedding_dimension: Optional[int] = None
+    temperature: Optional[float] = None
     is_default: Optional[bool] = None
 
 
@@ -29,6 +31,8 @@ class ModelConfigTest(BaseModel):
     base_url: str
     api_key: str = ""
     model: str
+    kind: Optional[str] = "chat"  # "chat" | "embedding"
+    embedding_dimension: Optional[int] = None
 
 
 class UserSettingUpdate(BaseModel):
