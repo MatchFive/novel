@@ -27,7 +27,16 @@ async def list_projects(
 
 @router.post("", response_model=ProjectOut)
 async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_db)):
+    from app.models import UserSetting
+
     p = Project(type=payload.type, title=payload.title, description=payload.description)
+    res = await db.execute(select(UserSetting))
+    s = res.scalars().first()
+    if s:
+        p.generation_config = {
+            "chapter_target_words": s.chapter_target_words,
+            "content_rating": s.content_rating,
+        }
     db.add(p)
     await db.commit()
     await db.refresh(p)

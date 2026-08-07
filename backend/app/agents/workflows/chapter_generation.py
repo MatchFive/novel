@@ -46,7 +46,7 @@ async def load_context(ctx):
     world = await repo.list_world(ctx.db, project_id)
     plot_nodes = await repo.list_plot(ctx.db, project_id)
     foreshadows = await repo.list_foreshadows(ctx.db, project_id)
-    target_words, rating = await generation_settings(ctx.db)
+    target_words, rating = await generation_settings(ctx.db, project_id)
 
     project = await ctx.db.get(Project, project_id)
     writing_style = (project.writing_style or {}) if project else {}

@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app import repositories as repo
 from app.agents.harness.workers._compat import context_session_get
-from app.models import UserSetting
+from app.models import Project, UserSetting
 
 logger = logging.getLogger(__name__)
 
@@ -158,8 +158,20 @@ def assigned_plot_nodes(plot_nodes: list[dict], chapter_id: str | None) -> list[
     return [p for p in plot_nodes if p.get("chapter_id") == chapter_id]
 
 
-async def generation_settings(db) -> tuple[int, str]:
-    """读取生成相关用户设置：(每章目标字数, 尺度等级)。"""
+async def generation_settings(db, project_id: str | None = None) -> tuple[int, str]:
+    """读取生成相关设置：(每章目标字数, 尺度等级)。优先级：项目 > 全局 > 默认。"""
+    if project_id:
+        project = await db.get(Project, project_id)
+        if project and project.generation_config:
+            cfg = project.generation_config
+            target = cfg.get("chapter_target_words")
+            rating = cfg.get("content_rating")
+            if target or rating:
+                return (
+                    int(target) if target else 2500,
+                    rating if rating else "standard",
+                )
+
     res = await db.execute(select(UserSetting))
     s = res.scalars().first()
     target = s.chapter_target_words if s and s.chapter_target_words else 2500
