@@ -7,16 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import ModelConfig
 
 
-DEFAULT_MODEL_PRESETS: list[dict[str, str]] = [
-    {"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat"},
-    {"name": "OpenAI", "base_url": "https://api.openai.com/v1", "model": "gpt-4o-mini"},
-    {"name": "SiliconFlow", "base_url": "https://api.siliconflow.cn/v1", "model": "deepseek-ai/DeepSeek-V3"},
-    {"name": "Moonshot", "base_url": "https://api.moonshot.cn/v1", "model": "moonshot-v1-8k"},
+DEFAULT_MODEL_PRESETS: list[dict[str, str | float]] = [
+    {"name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat", "temperature": 0.7},
 ]
 
 
 async def seed_default_models(db: AsyncSession) -> None:
-    """如果数据库里没有任何模型配置，则写入常用预设（api_key 为空，不标记为默认）。"""
+    """如果数据库里没有任何模型配置，则写入 DeepSeek 预设（api_key 为空，标记为默认）。"""
     res = await db.execute(select(ModelConfig))
     if res.scalars().first():
         return
@@ -26,6 +23,7 @@ async def seed_default_models(db: AsyncSession) -> None:
             base_url=preset["base_url"],
             api_key="",
             model=preset["model"],
-            is_default=False,
+            temperature=preset.get("temperature"),
+            is_default=True,
         ))
     await db.commit()
