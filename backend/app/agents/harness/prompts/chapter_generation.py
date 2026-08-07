@@ -10,7 +10,12 @@ from string import Template
 
 _JSON_RULES = """JSON 输出规则（必须遵守）：
 1. 只返回纯 JSON，不要 markdown 代码块（如 ```json），不要解释。
-2. action="update" 时必须提供 entity_id；action="add" 时 entity_id 必须为 null。
+2. action 必须是以下之一：add、update、partial_update、append、patch。
+   - add：新增节点，entity_id 必须为 null。
+   - update：重写整个节点，必须提供完整字段，会覆盖原内容，entity_id 必须存在。
+   - partial_update：只更新 after 中显式字段，未提及字段保持原样，entity_id 必须存在。
+   - append：在长文本字段末尾追加内容，entity_id 必须存在。
+   - patch：通过 search + replace 精确定位替换一段文本，entity_id 必须存在；after 中需提供 search、replace 和可选 field（默认 content）。
 3. 所有字符串字段必须是合法 JSON 字符串（转义双引号、换行使用 \\n）。
 """
 
@@ -474,7 +479,7 @@ def assignment_prompt(context: dict) -> str:
 
 def chapter_outline_prompt(context: dict) -> str:
     """根据 context 生成当前章节细纲的 prompt。"""
-    return CHAPTER_OUTLINE_PROMPT(
+    prompt = CHAPTER_OUTLINE_PROMPT(
         chapter=context["chapter"],
         broad_outline=context.get("broad_outline", "") or "（暂无总纲）",
         assigned_plot_nodes=context.get("assigned_plot_nodes") or [],
@@ -485,6 +490,21 @@ def chapter_outline_prompt(context: dict) -> str:
         target_words=context.get("target_words") or 2500,
         volume_outline=context.get("volume_outline", "") or "（暂无卷大纲）",
     )
+    style = context.get("writing_style") or {}
+    if any(style.values()):
+        parts = []
+        if style.get("perspective"):
+            parts.append(f"叙事视角：{style['perspective']}。")
+        if style.get("language_style"):
+            parts.append(f"语言风格：{style['language_style']}。")
+        if style.get("pace"):
+            parts.append(f"节奏：{style['pace']}。")
+        if style.get("tone"):
+            parts.append(f"情感基调：{style['tone']}。")
+        if style.get("custom_note"):
+            parts.append(f"补充：{style['custom_note']}")
+        prompt += "\n\n【文风要求】\n" + "".join(parts)
+    return prompt
 
 
 def chapter_text_prompt(context: dict) -> str:

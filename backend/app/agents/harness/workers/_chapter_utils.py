@@ -160,22 +160,20 @@ def assigned_plot_nodes(plot_nodes: list[dict], chapter_id: str | None) -> list[
 
 async def generation_settings(db, project_id: str | None = None) -> tuple[int, str]:
     """读取生成相关设置：(每章目标字数, 尺度等级)。优先级：项目 > 全局 > 默认。"""
-    if project_id:
-        project = await db.get(Project, project_id)
-        if project and project.generation_config:
-            cfg = project.generation_config
-            target = cfg.get("chapter_target_words")
-            rating = cfg.get("content_rating")
-            if target or rating:
-                return (
-                    int(target) if target else 2500,
-                    rating if rating else "standard",
-                )
-
     res = await db.execute(select(UserSetting))
     s = res.scalars().first()
     target = s.chapter_target_words if s and s.chapter_target_words else 2500
     rating = s.content_rating if s and s.content_rating else "standard"
+
+    if project_id:
+        project = await db.get(Project, project_id)
+        if project and project.generation_config:
+            cfg = project.generation_config
+            if cfg.get("chapter_target_words") is not None:
+                target = int(cfg["chapter_target_words"])
+            if cfg.get("content_rating") is not None:
+                rating = cfg["content_rating"]
+
     return target, rating
 
 

@@ -23,7 +23,8 @@ export const settingsApi = {
   deleteModel: (id: string) => api.delete(`/settings/models/${id}`),
   testModel: (data: Partial<ModelConfigPayload>) => api.post("/settings/models/test", data),
   fetchModels: (base_url: string, api_key?: string) =>
-    api.get<{ ok: boolean; models?: string[]; error?: string }>("/settings/models/fetch", {
-      params: { base_url, api_key: api_key || "" },
+    api.post<{ ok: boolean; models?: string[]; error?: string }>("/settings/models/fetch", {
+      base_url,
+      api_key: api_key || "",
     }),
 };

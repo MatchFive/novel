@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class WritingStyle(BaseModel):
@@ -15,6 +15,22 @@ class WritingStyle(BaseModel):
 class GenerationConfig(BaseModel):
     chapter_target_words: Optional[int] = None
     content_rating: Optional[str] = None
+
+    @field_validator("chapter_target_words")
+    @classmethod
+    def _clamp_target_words(cls, v: Optional[int]) -> Optional[int]:
+        if v is None:
+            return None
+        return min(8000, max(1000, v))
+
+    @field_validator("content_rating")
+    @classmethod
+    def _validate_content_rating(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        if v not in ("loose", "standard", "strict"):
+            raise ValueError("content_rating 必须是 loose/standard/strict 之一")
+        return v
 
 
 class ProjectCreate(BaseModel):

@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models import ModelConfig, UserSetting
 from app.schemas.setting import (
     ModelConfigCreate,
+    ModelConfigFetch,
     ModelConfigUpdate,
     ModelConfigTest,
     UserSettingUpdate,
@@ -134,9 +135,10 @@ async def delete_model(model_id: str, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 
-@router.get("/models/fetch")
-async def fetch_provider_models(base_url: str, api_key: str = ""):
-    url = base_url.rstrip("/") + "/models"
+@router.post("/models/fetch")
+async def fetch_provider_models(payload: ModelConfigFetch):
+    url = payload.base_url.rstrip("/") + "/models"
+    api_key = payload.api_key or ""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         async with httpx.AsyncClient(timeout=15) as client:

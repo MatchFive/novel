@@ -159,3 +159,35 @@ async def test_generation_settings_without_project_id_uses_user_setting(setup_db
         target, rating = await generation_settings(db)
         assert target == 4000
         assert rating == "loose"
+
+
+@pytest.mark.anyio
+async def test_generation_settings_partial_config_falls_back_field_by_field(setup_db, cleanup_tables):
+    async with AsyncSessionLocal() as db:
+        s = UserSetting(content_rating="strict", chapter_target_words=1500)
+        db.add(s)
+        p = Project(
+            type="long",
+            title="t",
+            generation_config={"chapter_target_words": 3200},
+        )
+        db.add(p)
+        await db.commit()
+        await db.refresh(p)
+
+        target, rating = await generation_settings(db, p.id)
+        assert target == 3200
+        assert rating == "strict"
+
+        p2 = Project(
+            type="long",
+            title="t2",
+            generation_config={"content_rating": "loose"},
+        )
+        db.add(p2)
+        await db.commit()
+        await db.refresh(p2)
+
+        target2, rating2 = await generation_settings(db, p2.id)
+        assert target2 == 1500
+        assert rating2 == "loose"

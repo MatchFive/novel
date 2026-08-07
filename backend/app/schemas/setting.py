@@ -35,6 +35,11 @@ class ModelConfigTest(BaseModel):
     embedding_dimension: Optional[int] = None
 
 
+class ModelConfigFetch(BaseModel):
+    base_url: str
+    api_key: str = ""
+
+
 class UserSettingUpdate(BaseModel):
     recursive_limit: Optional[int] = None
     theme: Optional[str] = None
