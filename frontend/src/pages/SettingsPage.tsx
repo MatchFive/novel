@@ -5,9 +5,13 @@ import type { ModelConfigPayload } from "@/api/settings";
 import type { ModelConfig, UserSettings } from "@/types";
 import { Button, Input, Card } from "@/components/ui";
 
-function ModelCard({ m, onChange }: { m: ModelConfig; onChange: () => void }) {
+function getModelKind(m: ModelConfig): "chat" | "embedding" {
+  return m.level === "embedding" || m.embedding_model ? "embedding" : "chat";
+}
+
+function ModelCard({ m, onChange, onError }: { m: ModelConfig; onChange: () => void; onError: (msg: string) => void }) {
   const [editing, setEditing] = useState(false);
-  const kind = m.level === "embedding" || m.embedding_model ? "embedding" : "chat";
+  const kind = getModelKind(m);
   const [form, setForm] = useState({
     name: m.name,
     base_url: m.base_url,
@@ -17,18 +21,53 @@ function ModelCard({ m, onChange }: { m: ModelConfig; onChange: () => void }) {
     embedding_dimension: m.embedding_dimension ?? 1536,
   });
 
+  useEffect(() => {
+    if (editing) {
+      setForm({
+        name: m.name,
+        base_url: m.base_url,
+        api_key: "",
+        model: m.model,
+        temperature: m.temperature ?? 0.7,
+        embedding_dimension: m.embedding_dimension ?? 1536,
+      });
+    }
+  }, [editing, m.id, m.name, m.base_url, m.model, m.temperature, m.embedding_dimension]);
+
   const save = async () => {
-    const payload: Partial<ModelConfigPayload> = {
-      name: form.name,
-      base_url: form.base_url,
-      model: form.model,
-      temperature: kind === "chat" ? form.temperature : undefined,
-      embedding_dimension: kind === "embedding" ? form.embedding_dimension : undefined,
-    };
-    if (form.api_key) payload.api_key = form.api_key;
-    await settingsApi.updateModel(m.id, payload);
-    setEditing(false);
-    onChange();
+    try {
+      const payload: Partial<ModelConfigPayload> = {
+        name: form.name,
+        base_url: form.base_url,
+        model: form.model,
+        temperature: kind === "chat" ? form.temperature : undefined,
+        embedding_dimension: kind === "embedding" ? form.embedding_dimension : undefined,
+      };
+      if (form.api_key) payload.api_key = form.api_key;
+      await settingsApi.updateModel(m.id, payload);
+      setEditing(false);
+      onChange();
+    } catch (e) {
+      onError("保存失败：" + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  const setDefault = async () => {
+    try {
+      await settingsApi.updateModel(m.id, { is_default: true });
+      onChange();
+    } catch (e) {
+      onError("设为默认失败：" + (e instanceof Error ? e.message : String(e)));
+    }
+  };
+
+  const deleteModel = async () => {
+    try {
+      await settingsApi.deleteModel(m.id);
+      onChange();
+    } catch (e) {
+      onError("删除失败：" + (e instanceof Error ? e.message : String(e)));
+    }
   };
 
   if (editing) {
@@ -63,8 +102,8 @@ function ModelCard({ m, onChange }: { m: ModelConfig; onChange: () => void }) {
         </div>
         <div className="flex gap-2">
           <Button variant="ghost" onClick={() => setEditing(true)}>编辑</Button>
-          <Button variant="ghost" onClick={async () => { await settingsApi.updateModel(m.id, { is_default: true }); onChange(); }}>设为默认</Button>
-          <Button variant="ghost" onClick={async () => { await settingsApi.deleteModel(m.id); onChange(); }}>删</Button>
+          <Button variant="ghost" onClick={setDefault}>设为默认</Button>
+          <Button variant="ghost" onClick={deleteModel}>删</Button>
         </div>
       </div>
     </div>
@@ -124,45 +163,69 @@ export default function SettingsPage() {
   const updateAssistantSetting = (key: keyof UserSettings, value: number) =>
     saveSettings({ [key]: value } as Partial<UserSettings>);
 
-  const chatModels = models.filter((m) => !m.embedding_model && !m.level?.includes("embedding"));
-  const embeddingModels = models.filter((m) => m.embedding_model || m.level === "embedding");
+  const chatModels = models.filter((m) => getModelKind(m) === "chat");
+  const embeddingModels = models.filter((m) => getModelKind(m) === "embedding");
 
   const fetchAvailable = async () => {
-    const r = await settingsApi.fetchModels(addForm.base_url, addForm.api_key);
-    if (r.data.ok && r.data.models) {
-      setAvailableModels(r.data.models);
-    } else {
-      setTestMsg("拉取失败：" + (r.data.error || "未知错误"));
+    try {
+      const r = await settingsApi.fetchModels(addForm.base_url, addForm.api_key);
+      if (r.data.ok && r.data.models) {
+        setAvailableModels(r.data.models);
+      } else {
+        setTestMsg("拉取失败：" + (r.data.error || "未知错误"));
+      }
+    } catch (e) {
+      setTestMsg("拉取失败：" + (e instanceof Error ? e.message : String(e)));
     }
   };
 
   const testModel = async () => {
-    const r = await settingsApi.testModel({
-      base_url: addForm.base_url,
-      api_key: addForm.api_key,
-      model: addForm.model,
-      kind: addForm.kind,
-      embedding_dimension: addForm.embedding_dimension,
-    });
-    setTestMsg(r.data.ok ? (addForm.kind === "embedding" ? `维度校验通过：${r.data.dimension}` : "连接成功") : "失败：" + r.data.error);
+    try {
+      const r = await settingsApi.testModel({
+        base_url: addForm.base_url,
+        api_key: addForm.api_key,
+        model: addForm.model,
+        kind: addForm.kind,
+        embedding_dimension: addForm.embedding_dimension,
+      });
+      setTestMsg(
+        r.data.ok
+          ? addForm.kind === "embedding"
+            ? `维度校验通过：${r.data.dimension ?? "未知"}`
+            : "连接成功"
+          : "失败：" + r.data.error
+      );
+    } catch (e) {
+      setTestMsg("测试失败：" + (e instanceof Error ? e.message : String(e)));
+    }
   };
 
   const saveNewModel = async () => {
-    const payload: ModelConfigPayload = {
-      name: addForm.name,
-      base_url: addForm.base_url,
-      model: addForm.model,
-      api_key: addForm.api_key,
-      is_default: models.length === 0,
-      level: addForm.kind === "embedding" ? "embedding" : undefined,
-      embedding_model: addForm.kind === "embedding" ? addForm.model : undefined,
-      embedding_dimension: addForm.kind === "embedding" ? addForm.embedding_dimension : undefined,
-      temperature: addForm.kind === "chat" ? addForm.temperature : undefined,
-    };
-    await settingsApi.createModel(payload);
-    setAddForm({ ...addForm, name: "", base_url: "", api_key: "", model: "" });
-    setShowAdd(false);
-    await load();
+    if (!addForm.name || !addForm.base_url || !addForm.model) {
+      setTestMsg("请填写名称、base_url 和模型");
+      return;
+    }
+    try {
+      const payload: ModelConfigPayload = {
+        name: addForm.name,
+        base_url: addForm.base_url,
+        model: addForm.model,
+        api_key: addForm.api_key,
+        is_default: models.length === 0,
+        level: addForm.kind === "embedding" ? "embedding" : undefined,
+        embedding_model: addForm.kind === "embedding" ? addForm.model : undefined,
+        embedding_dimension: addForm.kind === "embedding" ? addForm.embedding_dimension : undefined,
+        temperature: addForm.kind === "chat" ? addForm.temperature : undefined,
+      };
+      await settingsApi.createModel(payload);
+      setAddForm({ ...addForm, name: "", base_url: "", api_key: "", model: "" });
+      setAvailableModels([]);
+      setShowAdd(false);
+      setTestMsg("");
+      await load();
+    } catch (e) {
+      setTestMsg("保存失败：" + (e instanceof Error ? e.message : String(e)));
+    }
   };
 
   const assistantItems: { key: keyof UserSettings; label: string; min: number; max: number }[] = [
@@ -249,18 +312,18 @@ export default function SettingsPage() {
         <div className="space-y-3 p-4">
           <div className="text-sm font-medium text-ink">文本模型</div>
           {chatModels.map((m) => (
-            <ModelCard key={m.id} m={m} onChange={load} />
+            <ModelCard key={m.id} m={m} onChange={load} onError={setTestMsg} />
           ))}
           <div className="mt-4 text-sm font-medium text-ink">向量模型</div>
           {embeddingModels.map((m) => (
-            <ModelCard key={m.id} m={m} onChange={load} />
+            <ModelCard key={m.id} m={m} onChange={load} onError={setTestMsg} />
           ))}
 
           {!showAdd ? (
             <Button variant="primary" className="w-full" onClick={() => setShowAdd(true)}>+ 新增模型</Button>
           ) : (
             <div className="space-y-2 rounded-lg border border-line p-3">
-              <select value={addForm.kind} onChange={(e) => setAddForm({ ...addForm, kind: e.target.value as any })} className={selectClass}>
+              <select value={addForm.kind} onChange={(e) => setAddForm({ ...addForm, kind: e.target.value as "chat" | "embedding" })} className={selectClass}>
                 <option value="chat">文本模型</option>
                 <option value="embedding">向量模型</option>
               </select>
@@ -283,7 +346,7 @@ export default function SettingsPage() {
               <div className="flex gap-2">
                 <Button variant="ghost" onClick={testModel}>测试连接</Button>
                 <Button variant="primary" onClick={saveNewModel}>保存</Button>
-                <Button variant="ghost" onClick={() => setShowAdd(false)}>取消</Button>
+                <Button variant="ghost" onClick={() => { setShowAdd(false); setAvailableModels([]); setTestMsg(""); }}>取消</Button>
               </div>
               {testMsg && <div className="text-xs text-muted">{testMsg}</div>}
             </div>
