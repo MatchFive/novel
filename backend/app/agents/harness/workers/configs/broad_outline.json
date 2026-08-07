@@ -24,7 +24,7 @@
         "items": {
           "type": "object",
           "properties": {
-            "action": {"type": "string", "enum": ["add", "update"]},
+            "action": {"type": "string", "enum": ["add", "update", "partial_update", "append", "patch"]},
             "entity_id": {"type": ["string", "null"]},
             "entity_type": {"type": "string"},
             "fields": {"type": "object"},

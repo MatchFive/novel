@@ -51,6 +51,15 @@ $world
 
 【剧情节点】
 $plot_nodes
+
+变更类型说明：
+- add: 新增节点
+- update: 重写整个节点（必须提供完整字段，会覆盖原内容）
+- partial_update: 只更新指定的字段，未提及字段保持原样
+- append: 在 content 等长文本字段末尾追加内容
+- patch: 通过 search + replace 精确定位替换一段文本
+
+重要：如果用户只是修改总纲中的某一部分，优先使用 partial_update、append 或 patch，避免使用 update 导致未提及内容丢失。
 """
 )
 
