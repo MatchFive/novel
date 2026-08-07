@@ -10,6 +10,8 @@ export interface ModelConfigPayload {
   level?: string;
   embedding_model?: string;
   embedding_dimension?: number;
+  temperature?: number;
+  kind?: "chat" | "embedding";
 }
 
 export const settingsApi = {
@@ -20,4 +22,8 @@ export const settingsApi = {
   updateModel: (id: string, data: Partial<ModelConfigPayload>) => api.put(`/settings/models/${id}`, data),
   deleteModel: (id: string) => api.delete(`/settings/models/${id}`),
   testModel: (data: Partial<ModelConfigPayload>) => api.post("/settings/models/test", data),
+  fetchModels: (base_url: string, api_key?: string) =>
+    api.get<{ ok: boolean; models?: string[]; error?: string }>("/settings/models/fetch", {
+      params: { base_url, api_key: api_key || "" },
+    }),
 };

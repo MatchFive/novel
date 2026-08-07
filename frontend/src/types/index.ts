@@ -31,6 +31,7 @@ export interface ModelConfig {
   level?: string;
   embedding_model?: string;
   embedding_dimension?: number;
+  temperature?: number;
 }
 
 export interface UserSettings {
