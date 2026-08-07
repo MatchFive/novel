@@ -276,7 +276,7 @@ export default function SettingsPage() {
       </Card>
 
       <Card className="mt-6">
-        <div className="border-b border-line px-4 py-3 font-serif text-sm font-medium text-ink">章节生成</div>
+        <div className="border-b border-line px-4 py-3 font-serif text-sm font-medium text-ink">章节生成默认值（新建项目）</div>
         <div className="space-y-4 p-4">
           <div className="flex items-center justify-between">
             <span className="text-sm text-ink">每章目标字数</span>
@@ -303,6 +303,9 @@ export default function SettingsPage() {
           </div>
           <div className="text-xs text-muted">
             目标字数用于章节拆分与正文分段生成；尺度等级决定正文生成后的自动检查与改写强度。
+          </div>
+          <div className="text-xs text-muted">
+            此处仅作为新建项目的初始默认值。每个项目可在项目设置中单独覆盖。
           </div>
         </div>
       </Card>

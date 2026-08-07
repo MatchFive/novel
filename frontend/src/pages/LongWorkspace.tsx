@@ -20,6 +20,7 @@ export default function LongWorkspace() {
   const nav = useNavigate();
   const [tab, setTab] = useState("outline");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [genSettingsOpen, setGenSettingsOpen] = useState(false);
   const [project, setProject] = useState<Project | null>(null);
 
   useEffect(() => {
@@ -53,16 +54,25 @@ export default function LongWorkspace() {
         {(tab === "character" || tab === "foreshadow" || tab === "world" || tab === "plot") && (
           <EntityWorkbench pid={id!} config={WORKBENCH_CONFIGS[tab]} api={KIND_API[tab]} />
         )}
-        {tab === "chapter" && <ChapterPanel pid={id!} />}
+        {tab === "chapter" && <ChapterPanel pid={id!} onOpenGenSettings={() => setGenSettingsOpen(true)} />}
         {tab === "graph" && <GraphPanel pid={id!} />}
       </div>
       {project && (
-        <ProjectSettingsDialog
-          project={project}
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
-          onSaved={setProject}
-        />
+        <>
+          <ProjectSettingsDialog
+            project={project}
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            onSaved={setProject}
+          />
+          <ProjectSettingsDialog
+            project={project}
+            open={genSettingsOpen}
+            initialTab="generation"
+            onClose={() => setGenSettingsOpen(false)}
+            onSaved={setProject}
+          />
+        </>
       )}
     </div>
   );
@@ -133,7 +143,7 @@ const WORKBENCH_CONFIGS: Record<string, EntityWorkbenchConfig> = {
   },
 };
 
-function ChapterPanel({ pid }: { pid: string }) {
+function ChapterPanel({ pid, onOpenGenSettings }: { pid: string; onOpenGenSettings: () => void }) {
   const [items, setItems] = useState<Chapter[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<Chapter | null>(null);
@@ -374,6 +384,7 @@ function ChapterPanel({ pid }: { pid: string }) {
         >
           世界观一致性
         </Button>
+        <Button variant="ghost" onClick={onOpenGenSettings}>⚙ 生成设置</Button>
       </div>
       {workflowMessage && (
         <div className="mb-3 text-sm text-muted">{workflowMessage}</div>
