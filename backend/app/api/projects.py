@@ -51,6 +51,10 @@ async def update_project(project_id: str, payload: ProjectUpdate, db: AsyncSessi
         p.title = payload.title
     if payload.description is not None:
         p.description = payload.description
+    if payload.writing_style is not None:
+        p.writing_style = payload.writing_style.model_dump(exclude_none=True)
+    if payload.generation_config is not None:
+        p.generation_config = payload.generation_config.model_dump(exclude_none=True)
     await db.commit()
     await db.refresh(p)
     return p.to_dict()
