@@ -50,6 +50,7 @@ _DEDUP_KEY_FIELD = {
     "foreshadow": "title",
     "plot": "title",
     "outline": "title",
+    "chapter": "order",
 }
 
 
@@ -141,7 +142,7 @@ async def _validate_outline_change(db: AsyncSession, project_id: str, action: st
         raise AppError("无效的大纲类型", "INVALID_TYPE", 400)
 
     existing = None
-    if action == "update" and entity_id:
+    if action in ("update", "partial_update", "append", "patch") and entity_id:
         existing = await db.get(LongOutline, entity_id)
         if existing is None:
             raise NotFoundError("待操作节点不存在")
@@ -258,6 +259,62 @@ async def apply_change(db: AsyncSession, project_id: str, change: dict) -> dict:
                 data["project_id"] = project_id
                 row = await create_fn(db, data)
                 new_id = row.get("id")
+        elif action == "partial_update":
+            if not entity_id:
+                raise AppError("partial_update 缺少 entity_id", "BAD_CHANGE", 400)
+            existing = await get_fn(db, entity_id)
+            if not existing:
+                raise NotFoundError("待更新实体不存在")
+            # 过滤掉 None 值，只更新显式字段
+            merged = {k: v for k, v in after.items() if v is not None}
+            row = await update_fn(db, entity_id, merged)
+            if not row:
+                raise NotFoundError("待更新实体不存在")
+            new_id = entity_id
+            after = merged
+        elif action == "append":
+            if not entity_id:
+                raise AppError("append 缺少 entity_id", "BAD_CHANGE", 400)
+            existing = await get_fn(db, entity_id)
+            if not existing:
+                raise NotFoundError("待追加实体不存在")
+            merged = {}
+            for k, v in after.items():
+                old = existing.get(k)
+                if isinstance(old, str) and isinstance(v, str):
+                    merged[k] = old + v
+                else:
+                    merged[k] = v
+            row = await update_fn(db, entity_id, merged)
+            if not row:
+                raise NotFoundError("待追加实体不存在")
+            new_id = entity_id
+            after = merged
+        elif action == "patch":
+            if not entity_id:
+                raise AppError("patch 缺少 entity_id", "BAD_CHANGE", 400)
+            existing = await get_fn(db, entity_id)
+            if not existing:
+                raise NotFoundError("待补丁实体不存在")
+            search = after.get("search")
+            replace = after.get("replace")
+            field = after.get("field", "content")
+            if not isinstance(search, str) or not isinstance(replace, str):
+                raise AppError("patch 必须提供 search/replace 字符串", "BAD_CHANGE", 400)
+            old_value = existing.get(field, "")
+            if not isinstance(old_value, str):
+                raise AppError(f"patch 字段 {field} 不是文本", "BAD_CHANGE", 400)
+            count = old_value.count(search)
+            if count == 0:
+                raise AppError(f"patch 未找到匹配文本：{search[:50]}", "PATCH_NOT_FOUND", 400)
+            if count > 1:
+                raise AppError(f"patch 匹配文本出现 {count} 次，请扩大上下文", "PATCH_AMBIGUOUS", 400)
+            merged = {field: old_value.replace(search, replace, 1)}
+            row = await update_fn(db, entity_id, merged)
+            if not row:
+                raise NotFoundError("待补丁实体不存在")
+            new_id = entity_id
+            after = merged
         elif action == "update":
             if not entity_id:
                 raise AppError("update 缺少 entity_id", "BAD_CHANGE", 400)
