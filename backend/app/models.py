@@ -38,6 +38,8 @@ class Project(Base):
     type = Column(Enum("long", name="project_type"), nullable=False, index=True)
     title = Column(String(255), nullable=False, default="未命名")
     description = Column(Text, default="")
+    writing_style = Column(JSON, default=dict)
+    generation_config = Column(JSON, default=dict)
     created_at = Column(DateTime, default=_now, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
 
@@ -47,6 +49,8 @@ class Project(Base):
             "type": self.type,
             "title": self.title,
             "description": self.description,
+            "writing_style": self.writing_style or {},
+            "generation_config": self.generation_config or {},
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
