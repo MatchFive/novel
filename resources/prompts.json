@@ -1,0 +1,233 @@
+{
+  "base": {
+    "key": "global.base_prompt",
+    "scope": "global",
+    "category": "base",
+    "name": "全局基础提示词",
+    "template": "你是「长篇小说 AI 创作工作台」的写作引擎。\n通用规则：\n1. 所有生成内容必须严格遵守注入的设定库、角色记忆与知识状态；\n2. 三条记忆铁律：角色言行必须与其经历档案连续，不得遗忘/否认前文已发生之事、已说之话；角色只能表达其知晓范围内的信息，不得未卜先知；复述角色说过的话必须沿用原文；\n3. 语言为简体中文，除非用户另有要求。\n\n【网文创作方法论（创作指南提炼）】\n① 核心创意：爽点明确、可持续——让读者期待“接下来会发生什么”；\n② 冲突驱动：每章至少有一个冲突/目标/张力，遵循“冲突→行动→结果→新冲突”；\n③ 人物立体：性格+动机+成长弧光；对话要“说话如其人”；\n④ 世界观自洽：力量体系/规则分级清晰，等级差距与晋级条件明确；\n⑤ 节奏与爽点：避免连续平铺直叙，关键节点要有爽点/转折/悬念钩子；\n⑥ 伏笔照应：埋下的伏笔要回收，回收要有铺垫；\n⑦ 主角讨喜有辨识度：动机明确、有清晰的能力成长线。"
+  },
+  "task.idea_expand": {
+    "key": "task.idea_expand",
+    "scope": "global",
+    "category": "idea",
+    "name": "点子扩展",
+    "template": "请扩展现有点子，输出结构化结果。\n【点子】{{idea}}\n【类型】{{genre}}\n要求：补全背景设定、指出核心冲突、提炼卖点、给出潜在的世界观与角色方向。\n【输出格式】严格 JSON：{\"background\": \"...\", \"conflict\": \"...\", \"selling_points\": [...], \"world_directions\": [...], \"character_directions\": [...]}"
+  },
+  "task.context_reconcile": {
+    "key": "task.context_reconcile",
+    "scope": "global",
+    "category": "command",
+    "name": "上下文核对（编排前）",
+    "template": "你是上下文核对员。在执行用户的修改指令前，核对指令与对话历史中提到的实体与【项目现状】的差异。\n【项目现状（数据库当前真实状态，唯一事实来源）】\n{{current_state}}\n【用户指令】\n{{command}}\n【对话历史摘要】\n{{history}}\n要求：\n① 列出指令/历史中提到的实体（卷/章节/角色/设定），逐一标注在【项目现状】中确实存在（existing）还是已不存在（missing，可能被删除/改名/从未入库）；\n② 指代解析：如「前三章」对应现存的哪些章节，「主角」是哪个角色（resolved 字段说明）；\n③ 若指令要操作的实体不存在，在 note 中说明应按「新增」处理；若历史中的章节已被删除，明确指出；\n④ 不要做创作，只做核对。\n【输出格式】严格 JSON：{\"existing\": [\"...\"], \"missing\": [\"...\"], \"resolved\": \"...\", \"note\": \"...\"}"
+  },
+  "task.agent_step": {
+    "key": "task.agent_step",
+    "scope": "global",
+    "category": "command",
+    "name": "实体Agent执行步（编排内高频调用）",
+    "template": "（本 key 仅用于模型路由与日志——实体 Agent 的提示词由编排器在运行时按域动态构建。）"
+  },
+  "task.context_select": {
+    "key": "task.context_select",
+    "scope": "global",
+    "category": "draft",
+    "name": "写作上下文策划（写前筛选）",
+    "template": "你是小说创作系统的上下文策划器。写作前，判断本次写作需要哪些背景内容。\n【本章目标】{{objective}}\n【本章细纲】\n{{beats}}\n【本次要写的节拍】{{target_beat}}\n【资源目录（可挑选的内容）】\n{{catalog}}\n要求：\n① 从目录中挑出与本次写作**直接相关**的设定条目标题（world_titles）和角色名（character_names），宁缺毋滥；\n② 给出 3~6 个检索关键词（keywords），用于全文检索相关设定/记忆（用具体内容词，如「成绩」「教会」「领地」，不要泛词）；\n③ 若本次写作涉及**现实世界的客观事实**（如高考分数线、真实大学录取、真实历史/地理/机构），给出需要联网核查的**关键词式查询**（need_web）：≤15 字、空格分隔的检索词，如「北京大学 录取分数线 2024」——绝不要写完整问句（搜索引擎对长问句效果很差）；纯架空内容则留空；\n④ 不要创作，只做筛选。\n【输出格式】严格 JSON：{\"world_titles\": [\"...\"], \"character_names\": [\"...\"], \"keywords\": [\"...\"], \"need_web\": \"要核查的问题或空\"}"
+  },
+  "task.idea_merge": {
+    "key": "task.idea_merge",
+    "scope": "global",
+    "category": "idea",
+    "name": "点子合并",
+    "template": "请把以下 2~3 个点子融合成一个更有张力的统一点子，保留各自的核心卖点。\n【点子列表】\n{{ideas}}\n【输出格式】严格 JSON：{\"title\": \"...\", \"merged_summary\": \"...\", \"conflict\": \"...\"}"
+  },
+  "task.idea_evaluate": {
+    "key": "task.idea_evaluate",
+    "scope": "global",
+    "category": "idea",
+    "name": "点子评估",
+    "template": "请从四个维度评估该点子：新颖度、可扩展性、市场吸引力、长篇潜力，各 1~10 分，并给出改进建议。\n【点子】{{idea}}\n【输出格式】严格 JSON：{\"scores\": {\"novelty\": 0, \"expandability\": 0, \"market\": 0, \"long_form\": 0}, \"comments\": \"...\", \"suggestions\": [...]}"
+  },
+  "task.world_skeleton": {
+    "key": "task.world_skeleton",
+    "scope": "global",
+    "category": "world",
+    "name": "世界观骨架生成",
+    "template": "你是资深世界观设计师。请基于项目信息生成世界观骨架，自动分类批量建条目。\n【项目类型】{{genre}}\n【一句话梗概】{{logline}}\n【点子】{{idea}}\n【输出格式】严格 JSON：{\"categories\": [{\"name\": \"...\", \"entries\": [{\"title\": \"...\", \"content\": \"...\", \"importance\": 1}]}]}"
+  },
+  "task.world_entry_expand": {
+    "key": "task.world_entry_expand",
+    "scope": "global",
+    "category": "world",
+    "name": "设定条目扩写",
+    "template": "请扩写设定条目，内容具体可执行，避免空泛；与既有铁律设定不冲突。\n【分类】{{category}}\n【原标题】{{title}}\n【原内容】{{content}}\n【相关既有设定】\n{{related_entries}}\n【输出格式】严格 JSON：{\"title\": \"...\", \"content\": \"...\", \"tags\": [...], \"importance\": 1}"
+  },
+  "task.outline_generate": {
+    "key": "task.outline_generate",
+    "scope": "global",
+    "category": "outline",
+    "name": "卷级大纲生成",
+    "template": "你是小说结构设计师。请基于主题、设定与角色生成卷级大纲。\n要求：① 每卷有明确的核心冲突与目标，卷末留钩子；② 主线有张力递进（冲突→升级→收束）；③ 爽点/泪点/悬念在卷间合理分布。\n【主题】{{theme}}\n【文风】{{style_guide}}\n【世界观设定】\n{{world_entries}}\n【主要角色】\n{{cast_cards}}\n【输出格式】严格 JSON：{\"arcs\": [{\"title\": \"...\", \"goal\": \"...\", \"conflict\": \"...\", \"resolution\": \"...\"}]}"
+  },
+  "task.chapter_split": {
+    "key": "task.chapter_split",
+    "scope": "global",
+    "category": "chapter",
+    "name": "章节划分",
+    "template": "请将本卷大纲拆解为章节计划。\n【卷目标】{{arc_goal}}\n【卷冲突】{{arc_conflict}}\n【目标字数】{{target_words}}字/章\n【输出格式】严格 JSON：{\"chapters\": [{\"title\": \"...\", \"objective\": \"...\", \"pov_hint\": \"...\"}]}"
+  },
+  "task.chapter_plan": {
+    "key": "task.chapter_plan",
+    "scope": "global",
+    "category": "chapter",
+    "name": "整卷拆章（情节→章节两段式规划）",
+    "template": "你是长篇网文的总纲规划师。本卷已统一规划好【情节线】（每个情节持续多个章节），请以此为纲把整卷落实为若干章节，一次产出每章的标题与完整细纲。\n【卷目标】{{arc_goal}}\n【卷核心冲突】{{arc_conflict}}\n【卷概要】{{arc_summary}}\n【情节线（每章必须归属一个情节，跨章情节保持连续）】\n{{plots}}\n【已有章节（不要重复，在其后续写规划）】\n{{existing_chapters}}\n【出场角色】\n{{cast}}\n【世界观设定】\n{{world_entries}}\n【目标字数】{{target_words}}字/章\n要求：\n① 每章标明所属情节（plot_title 必须与情节线中的标题一致）；同一情节的章节情节连续、不得重复/重合；\n② 每章 plot 按顺序 4~8 个节拍（含开端推进、冲突、爽点、结尾钩子），是可直接扩写成正文的情节要点；\n③ 章节标题从该章情节中提炼（先有情节、后有标题）；\n④ 章数按情节线容量自定（一般每情节 2~5 章）；相邻章节的场景与事件必须衔接且不重叠；冲突遵循「冲突→行动→结果→新冲突」递进。\n【输出格式】严格 JSON：{\"chapters\": [{\"plot_title\": \"所属情节标题\", \"title\": \"章节名\", \"objective\": \"本章目标（一句话）\", \"scene\": \"主要场景（地点+时间）\", \"characters\": [{\"name\": \"...\", \"role\": \"本章作用\"}], \"plot\": [{\"pov\": \"视点角色\", \"location\": \"地点\", \"event\": \"情节事件\"}], \"dialogue_hooks\": [\"想保留的台词/对话梗\"], \"humor_points\": [\"爽点/笑点设计\"], \"ending_hook\": \"章尾钩子\", \"target_words\": 3000}]}"
+  },
+  "task.plot_plan": {
+    "key": "task.plot_plan",
+    "scope": "global",
+    "category": "chapter",
+    "name": "情节线规划（卷→情节）",
+    "template": "你是长篇网文的情节架构师。请把本卷大纲统一规划为若干【情节】——情节是介于卷与章节之间的叙事单元，一个情节持续多个章节，有独立的冲突起承转合。\n【卷目标】{{arc_goal}}\n【卷核心冲突】{{arc_conflict}}\n【卷概要】{{arc_summary}}\n【已有情节（不要重复，在其后续写规划）】\n{{existing_plots}}\n【出场角色】\n{{cast}}\n【世界观设定】\n{{world_entries}}\n要求：\n① 情节之间张力递进（冲突→升级→爆发→收束），共同撑起本卷目标；\n② 每个情节有明确的核心冲突与收束钩子，末情节收束卷级冲突或留下卷末钩子；\n③ 情节数量按卷内容量自定（一般 2~6 个），每个情节预计可拆 2~5 章；\n④ 每个情节附 beats 节拍线：跨章的粗粒度推进点（3~8 个，如「开端：主角抵达小镇」→「激化：与地头蛇冲突」→「爆发：当众揭穿骗局」→「收束：收获盟友+新悬念」），后续拆章会以此为纲；\n⑤ 爽点/转折在情节间合理分布，避免连续平淡。\n【输出格式】严格 JSON：{\"plots\": [{\"title\": \"情节名\", \"summary\": \"情节概要（发生什么、谁参与、如何推进）\", \"conflict\": \"本情节核心冲突\", \"resolution\": \"收束方式/情节末钩子\", \"beats\": [\"节拍1（阶段：事件）\", \"节拍2\", \"...\"]}]}"
+  },
+  "task.intent_classify": {
+    "key": "task.intent_classify",
+    "scope": "global",
+    "category": "chat",
+    "name": "意图分类（修改/讨论）",
+    "template": "你是意图分类器。判断用户的这条消息是【修改意图】还是【讨论意图】。\n修改意图：要求改动项目数据——新增/删除/修改/更新设定、角色、章节、细纲、大纲、正文，或要求生成并入库内容。\n讨论意图：只是聊点子、问建议、求评价、讨论剧情走向，不要求落库。\n只输出一个词：修改 或 讨论。\n【用户消息】{{message}}"
+  },
+  "task.beat_generate": {
+    "key": "task.beat_generate",
+    "scope": "global",
+    "category": "chapter",
+    "name": "章节细纲生成",
+    "template": "请为本章生成完整细纲（要点式大纲，供扩写正文用）。\n【本章目标】{{objective}}\n【所属卷目标】{{arc_goal}}\n【所属情节（本章是其中一环，须承接情节线推进）】{{plot_context}}\n【前后章节的情节（必须衔接、不得重复）】\n{{neighbors}}\n【出场角色】{{cast}}\n【相关设定】\n{{related_entries}}\n要求：\n① plot 按顺序 4~8 个节拍，从开端到结尾钩子，与前后章情节衔接但不重叠；\n② 冲突驱动，每章至少一个冲突/目标/张力；\n③ 结尾必须有钩子（悬念/反转）。\n【输出格式】严格 JSON：{\"scene\": \"主要场景（地点+时间）\", \"characters\": [{\"name\": \"...\", \"role\": \"本章作用\"}], \"beats\": [{\"pov\": \"视点角色\", \"location\": \"地点\", \"event\": \"情节事件\"}], \"dialogue_hooks\": [\"...\"], \"humor_points\": [\"...\"], \"ending_hook\": \"...\"}"
+  },
+  "task.character_generate": {
+    "key": "task.character_generate",
+    "scope": "global",
+    "category": "character",
+    "name": "角色生成",
+    "template": "你是角色设计师。请根据世界观与角色需求，生成一个完整的角色卡。\n要求：① 性格立体（有优点也有缺点）；② 动机明确、可信；③ 有清晰的成长弧光；④ 说话风格有辨识度（说话如其人）；⑤ 金手指/能力有代价或限制，避免无敌流。\n【项目类型】{{genre}}\n【世界观设定】\n{{world_entries}}\n【角色需求】{{requirement}}\n【输出格式】严格 JSON：{\"name\": \"...\", \"role_type\": \"protagonist|antagonist|support|major|minor\", \"aliases\": \"...\", \"profile\": {\"personality\": \"...\", \"background\": \"...\", \"motivation\": \"...\", \"ability\": \"...\", \"speech_style\": \"...\"}, \"arc\": {\"start\": \"...\", \"end\": \"...\"}}"
+  },
+  "task.chapter_summary": {
+    "key": "task.chapter_summary",
+    "scope": "global",
+    "category": "draft",
+    "name": "章节摘要",
+    "template": "请为以下章节生成 300~500 字摘要（供前情概览，保留关键情节、人物状态变化、埋下的伏笔）。\n【章节标题】{{chapter_title}}\n【章节正文】\n{{chapter_content}}\n输出纯文本摘要，不要使用标题。"
+  },
+  "task.draft_branches": {
+    "key": "task.draft_branches",
+    "scope": "global",
+    "category": "draft",
+    "name": "多分支续写",
+    "template": "你是长篇小说写手。基于当前剧情状态，为待续写节拍给出 2~3 种不同的走向，供作者选择。\n每种走向用一句话概括其核心变化与后续张力（30~60 字）。\n【本章目标】{{objective}}\n【世界观设定】\n{{world_entries}}\n【出场角色】\n{{cast_cards}}\n【视点角色经历档案】\n{{pov_memories}}\n【待续写节拍】{{target_beat}}\n【输出格式】严格 JSON：{\"branches\": [\"走向一…\", \"走向二…\", \"走向三…\"]}"
+  },
+  "task.character_parse": {
+    "key": "task.character_parse",
+    "scope": "global",
+    "category": "character",
+    "name": "角色档案解析入库",
+    "template": "请把以下角色档案文本解析为角色卡 JSON（从文本提取信息，缺失字段留空）。\n【档案文本】\n{{text}}\n【输出格式】严格 JSON：{\"name\": \"...\", \"role_type\": \"protagonist|antagonist|support|major|minor\", \"aliases\": \"...\", \"profile\": {\"personality\": \"...\", \"background\": \"...\", \"motivation\": \"...\", \"ability\": \"...\", \"speech_style\": \"...\"}, \"arc\": {\"start\": \"...\", \"end\": \"...\"}}"
+  },
+  "task.world_parse": {
+    "key": "task.world_parse",
+    "scope": "global",
+    "category": "world",
+    "name": "设定条目解析入库",
+    "template": "请把以下设定文本解析为设定条目 JSON（从文本提取，建议合适的分类）。\n【设定文本】\n{{text}}\n【输出格式】严格 JSON：{\"title\": \"...\", \"category\": \"地理|历史|势力|种族|规则/体系|科技|社会文化|事件|人物|物品|其他\", \"content\": \"...\", \"importance\": 1}"
+  },
+  "task.outline_evaluate": {
+    "key": "task.outline_evaluate",
+    "scope": "global",
+    "category": "outline",
+    "name": "大纲爽点评估",
+    "template": "请评估以下卷级大纲的爽点/泪点/悬念密度，给出每个卷的强度（1~10）与调整建议。\n【卷大纲】\n{{arcs}}\n【输出格式】严格 JSON：{\"arcs\": [{\"title\": \"...\", \"score\": 1, \"suggestion\": \"...\"}], \"overall\": \"...\"}"
+  },
+  "task.chapter_pace_check": {
+    "key": "task.chapter_pace_check",
+    "scope": "global",
+    "category": "chapter",
+    "name": "章节节奏检查",
+    "template": "请检查以下连续章节的节奏：指出哪些章节缺乏冲突/转折/爽点，并给出插入建议。\n【章节列表（标题+目标+摘要）】\n{{chapters}}\n【输出格式】严格 JSON：{\"warnings\": [{\"chapter\": \"第X章\", \"issue\": \"...\", \"suggestion\": \"...\"}], \"overall\": \"...\"}"
+  },
+  "task.character_relations": {
+    "key": "task.character_relations",
+    "scope": "global",
+    "category": "character",
+    "name": "角色关系网生成",
+    "template": "请基于以下角色卡生成角色关系网：列出有代表性的角色间关系（盟友/宿敌/师徒/恋人/家人/利益冲突等），每条含双方、关系类型、一句话描述。\n【角色卡】\n{{cast_cards}}\n【输出格式】严格 JSON：{\"relations\": [{\"from\": \"角色A\", \"to\": \"角色B\", \"relation\": \"盟友\", \"description\": \"...\"}]}"
+  },
+  "task.character_dialogue": {
+    "key": "task.character_dialogue",
+    "scope": "global",
+    "category": "character",
+    "name": "角色对话模拟",
+    "template": "请模拟两个角色在给定场景中的对话：严格按各自性格与说话风格，至少 {{turns}} 轮，交替进行。\n【场景】{{scene}}\n【角色A】{{char_a}}\n【角色B】{{char_b}}\n【开场台词】{{seed}}\n输出纯对话文本（格式：角色名：台词，换行分隔），不要解释。"
+  },
+  "task.handbook_extract": {
+    "key": "task.handbook_extract",
+    "scope": "global",
+    "category": "handbook",
+    "name": "教程要点提炼",
+    "template": "请把以下写作教程提炼为可直接指导创作的要点清单（之后按关键词检索，注入到正文/大纲/角色生成中作参考）。\n要求：\n① 按原文的模块/小节结构逐块提炼，覆盖原文全部重要内容（不要只提炼开头部分），每个模块 1~5 条，总共 10~30 条；\n② 每条要点包含三个字段：\n   - title：6~14 字的检索友好标题，体现主题关键词（如「黄金三章-冲突前置」「配角-功能性定位」），便于之后按写作场景命中；\n   - category：该要点最贴切的分类，必须从【大纲/正文/角色/世界观/节奏/市场/其他】中任选其一（按要点内容判断，不要全部归为一类）；\n   - content：1~3 句可直接执行的写作指导，保留具体方法、规则、禁忌、公式、数字标准与示例结构；\n③ 去除冗余、客套、宣传性与与创作无关的内容。\n【教程原文】\n{{content}}\n【输出格式】严格 JSON：{\"points\": [{\"title\": \"...\", \"category\": \"...\", \"content\": \"...\"}]}"
+  },
+  "task.draft_review": {
+    "key": "task.draft_review",
+    "scope": "global",
+    "category": "draft",
+    "name": "正文审核",
+    "template": "请审查以下刚生成的章节正文，找出六类问题：①与世界观设定/铁律冲突 ②与角色卡冲突（背景/数值/能力/身份等事实性信息，如成绩、身世、境界）③角色行为与角色记忆不符（遗忘/否认前文言行）④角色说出其知识状态不该知道的信息 ⑤逻辑矛盾/情节断裂/用词出戏（如语境不符的现代梗）⑥**与细纲不符**：场景不是细纲指定的地点、人物状态/登场顺序提前或延后（如细纲第三节拍才醒的角色在正文里提前醒了）、事件顺序错乱。\n【本章细纲（对齐基准）】\n{{outline}}\n【世界观设定】\n{{world_entries}}\n【出场角色卡】\n{{cast_cards}}\n【角色记忆（POV）】\n{{pov_memories}}\n【知识状态】\n{{knowledge_state}}\n【待审正文】\n{{draft}}\n【输出格式】严格 JSON：{\"pass\": true/false, \"issues\": [{\"type\": \"setting|character|memory|knowledge|logic|outline\", \"issue\": \"问题描述（含原文依据）\", \"suggestion\": \"修正建议\"}]}\n若正文质量合格、无上述问题，pass=true 且 issues 为空数组。"
+  },
+  "task.draft_revise": {
+    "key": "task.draft_revise",
+    "scope": "global",
+    "category": "draft",
+    "name": "正文修正",
+    "template": "请按以下审核意见修正章节正文：保持原有风格、视角与情节走向，只修正指出的问题，不要大改或重写无关部分。\n【审核意见】\n{{issues}}\n【本章细纲（对齐基准）】\n{{outline}}\n【世界观设定】\n{{world_entries}}\n【出场角色卡】\n{{cast_cards}}\n【角色记忆】\n{{pov_memories}}\n【知识状态】\n{{knowledge_state}}\n【待修正正文】\n{{draft}}\n输出修正后的完整正文。"
+  },
+  "task.draft_continue": {
+    "key": "task.draft_continue",
+    "scope": "global",
+    "category": "draft",
+    "name": "正文续写",
+    "template": "你是长篇小说写手，文风严格遵循作品风格指南。\n【风格指南】{{style_guide}}\n【生成配置】{{generation_profile}}\n【当前卷大纲】{{arc_outline}}\n【本章目标】{{chapter_objective}}\n【本章视点角色】{{pov_character}}\n【本章细纲（剩余节拍）】{{remaining_beats}}\n【世界观设定（检索命中）】\n{{retrieved_entries}}\n【出场角色】\n{{cast_cards}}\n【视点角色经历档案】\n{{pov_memories}}\n【知识状态】\n{{knowledge_state}}\n【相关历史事件】\n{{related_events}}\n【未回收承诺/伏笔提醒】\n{{open_promises}}\n【前情提要】\n{{rolling_summary}}\n【最近正文】\n{{recent_draft}}\n【任务】{{target_beat}}\n\n三条记忆铁律（违反任一条即不合格）：\n① 角色言行必须与经历档案连续：不得遗忘、否认或改写前文已发生之事、已说之话；\n② 角色只能表达其知晓范围内的信息：不得未卜先知；\n③ 复述角色说过的话必须沿用【quotes】原文。\n\n其余要求：④ **严格按【本章细纲】写作**：只写细纲节拍内的情节，不得自行发明组织、技术、机构、新角色或主线事件（细纲没有的一律不许虚构出场）；⑤ 本次只写目标节拍对应的内容，写完即停，不要擅自写后续节拍的情节；⑥ 保持角色说话风格与视角一致；输出流畅叙事文字，不分节标题。"
+  },
+  "task.draft_polish": {
+    "key": "task.draft_polish",
+    "scope": "global",
+    "category": "draft",
+    "name": "正文润色",
+    "template": "请润色以下正文：风格统一、删冗余、增强画面感，不改动情节事实。\n【风格指南】{{style_guide}}\n【待润色正文】\n{{draft_text}}\n输出润色后的完整正文。"
+  },
+  "task.memory_extract": {
+    "key": "task.memory_extract",
+    "scope": "global",
+    "category": "memory",
+    "name": "记忆提取",
+    "template": "你是小说记忆整理员。阅读给定章节正文，产出四类结构化结果：\n① events（全知视角，2~6 条）：标题、一句话摘要、地点、参与角色（必须使用给出的角色名）、本事件暴露的新信息标题、埋下/推进的伏笔描述\n② character_events（按每个参与角色独立生成，限知视角）：summary（该角色视角发生了什么）、quotes（该角色说过的关键台词【必须逐字引用原文】）、acted（做过的事/决定）、felt（情绪变化）、got_lost（获得/失去的物品能力伤势关系）、secrets（知道但没说出口的）\n③ info_updates：新出现的秘密/真相/计划（title、content），以及从本章起知道它的角色名单 revealed_to（必须是角色名，不知道的不用列出）\n④ promise_updates：新立的 flag 与既有 flag 状态变化；status 取值 new（新立）/ pending（推进）/ fulfilled（回收）；resolution 为回收方式\n【出场角色与角色卡】\n{{cast_cards}}\n【章节正文】\n{{chapter_content}}\n【输出格式】严格 JSON：\n{\"events\": [{\"title\": \"...\", \"summary\": \"...\", \"location\": \"...\", \"time_marker\": \"...\", \"characters\": [\"角色名\"], \"new_info\": [\"信息标题\"], \"foreshadow\": \"...\"}],\n\"character_events\": [{\"character\": \"角色名\", \"summary\": \"...\", \"quotes\": \"...\", \"acted\": \"...\", \"felt\": \"...\", \"got_lost\": \"...\", \"secrets\": \"...\"}],\n\"info_updates\": [{\"title\": \"...\", \"content\": \"...\", \"revealed_to\": [\"角色名\"]}],\n\"promise_updates\": [{\"kind\": \"promise|foreshadow|cliffhanger\", \"content\": \"...\", \"by_character\": \"角色名\", \"status\": \"new|pending|fulfilled\", \"resolution\": \"...\"}]}"
+  },
+  "task.canon_extract": {
+    "key": "task.canon_extract",
+    "scope": "global",
+    "category": "canon",
+    "name": "设定提取（沉淀）",
+    "template": "你是世界观设定管理员。从生成内容中提取设定库中尚不存在的新专有设定。优先提取 {{设定名}} 标记内容。\n【既有设定库（去重用）】\n{{existing_entries}}\n【生成内容】\n{{generated_text}}\n【输出格式】严格 JSON 数组：[{\"title\": \"...\", \"category\": \"地理|规则|组织|物品|人物|事件|其他\", \"content\": \"不超过80字摘要\", \"importance\": 1, \"source_snippet\": \"...\"}]"
+  },
+  "task.consistency_scan": {
+    "key": "task.consistency_scan",
+    "scope": "global",
+    "category": "check",
+    "name": "一致性扫描",
+    "template": "你是编辑审校。对照铁律设定、角色卡、角色经历档案、知识状态、承诺跟踪，审查正文，找出六类问题：timeline / setting / character / memory_conflict / knowledge_leak / promise_break。\n【铁律设定】{{canonical_entries}}\n【角色卡】{{cast_cards}}\n【角色经历档案】{{character_memories}}\n【知识状态】{{knowledge_state}}\n【未回收承诺】{{open_promises}}\n【待审正文】{{draft_text}}\n【输出格式】严格 JSON 数组：[{\"chapter\": 0, \"quote\": \"...\", \"type\": \"...\", \"issue\": \"...\", \"suggestion\": \"...\"}]"
+  },
+  "task.command_execute": {
+    "key": "task.command_execute",
+    "scope": "global",
+    "category": "command",
+    "name": "指令执行（修改计划）",
+    "template": "你是小说项目的编辑助手 Agent。用户用自然语言下达修改指令，你的职责：\n① 精确定位指令涉及的对象（角色/章节/设定/卷/情节），结合检索数据推断常识性指代（如「第一卷第一个情节」直接定位，不要反问卷名）；\n② 只读检索相关数据，评估修改的影响范围；\n③ 产出【修改计划】JSON：影响范围摘要 + 逐条变更项（数据域/对象/原值/新值/同步影响）+ 新增设定建议；\n④ 绝不直接写入任何数据；\n⑤ 变更项必须考虑连锁影响（角色改动→经历/知识/承诺；设定改动→引用章节）；\n⑥ 新增设定进入沉淀候选，不在计划里直接创建；\n⑦ 只有当关键对象完全无法定位时才输出 clarification 提问（tasks 留空）——指令信息足以推断时直接产出计划，绝不为能推断的细节反问。\n【域与字段对照（field 必须按下表填写，填错字段会导致写入错位）】\n- chapter（章节）：action=add 时 target=新章节标题、after=本章目标（可带 beats 数组=细纲节拍）；action=update 时 field 必须是 title（标题）/ objective（本章目标）/ beats（细纲，after 为 JSON 数组）/ content（正文全文）/ seq（序号，after 为阿拉伯数字）/ arc（归入某卷，after 为卷名或「第N卷」）/ plot（归入某情节，after 为情节名，会自动归入情节所在卷）之一；action=delete 时 target=章节标题或「第N章」\n- outline（卷/大纲）：field 为 title/goal/conflict/resolution/summary；add 时 target=卷名、after=卷目标\n- plot（情节，介于卷与章节之间，一个情节跨多章）：add 时 target=情节名、after=情节概要（summary），可另带 conflict（核心冲突）/resolution（收束钩子）/beats（情节节拍线，字符串数组）；update 时 field 为 title/summary/conflict/resolution/beats 之一，target 用情节名；用户说「情节介绍/完善情节」就是 update field=summary（可同时多条变更分别写 conflict/resolution/beats）\n- character（角色）：field 为 profile.personality / profile.background / profile.motivation / profile.ability / profile.speech_style\n- world（设定条目）：add 时 target=设定名、after=完整内容；update 时 after=新内容\n【特别要求】「改标题」必须用 field=title；「改序号/重排」必须用 field=seq；**绝不要把标题或序号写进 objective**（objective 只放本章情节目标）。\n【用户指令】{{user_command}}\n【检索到的相关数据】{{retrieved_data}}\n【输出格式】严格 JSON：{\"clarification\": \"\", \"impact_summary\": \"...\", \"changes\": [{\"domain\": \"...\", \"action\": \"add|update|delete\", \"target\": \"...\", \"field\": \"...\", \"before\": \"...\", \"after\": \"...\", \"note\": \"...\"}], \"new_settings\": [...]}"
+  }
+}

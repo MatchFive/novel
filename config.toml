@@ -1,0 +1,45 @@
+# 长篇小说 AI 创作工作台 —— 应用配置
+# API Key 仅保存在本机，请勿提交到版本库
+
+[app]
+data_dir = "data"          # SQLite 数据库与备份目录（相对项目根）
+
+[llm.providers.deepseek]
+base_url = "https://api.deepseek.com/v1"
+api_key = ""               # ← 填入你的 API Key
+models = { lite = "deepseek-chat", standard = "deepseek-chat", pro = "deepseek-reasoner" }
+
+# 可选：第二厂商（Pro 档可切到更强模型）
+# [llm.providers.openai]
+# base_url = "https://api.openai.com/v1"
+# api_key = ""
+# models = { lite = "gpt-4o-mini", standard = "gpt-4o", pro = "gpt-4o" }
+
+# 可选：本地部署的小模型（Ollama / LM Studio / vLLM 等 OpenAI 兼容接口）
+# 取消注释并填入你的本地服务地址与模型名，即可把轻量任务（如意图识别）分流到本地：
+# [llm.providers.local]
+# base_url = "http://127.0.0.1:11434/v1"   # Ollama；LM Studio 默认 http://127.0.0.1:1234/v1
+# api_key = ""
+# models = { lite = "qwen3:4b", standard = "qwen3:4b", pro = "qwen3:4b" }
+
+# 任务级指定：让某个任务固定走某厂商的某模型（优先级最高）
+# 例：对话意图识别走本地小模型——
+# [llm.routing.task_models."task.intent_classify"]
+# provider = "local"
+# model = "qwen3:4b"
+
+# 语义检索嵌入（AI 助手上下文组装按语义相关度挑选设定/角色）：
+# 要求服务提供 OpenAI 兼容的 /v1/embeddings 接口（LM Studio 可跑 all-MiniLM-L6-v2；
+# 中文内容更推荐 paraphrase-multilingual-MiniLM-L12-v2 或 bge-small-zh-v1.5）。
+# 不配 = 回退关键词/FTS 检索，行为与之前一致。
+# [llm.embedding]
+# provider = "local"
+# model = "all-MiniLM-L6-v2"
+
+[llm.routing]
+default_provider = "deepseek"
+default_tier     = "standard"     # lite / standard / pro
+auto_downgrade   = true           # pro 失败/限流时自动降级 standard 并提示
+
+[ui]
+theme = "system"                  # system / light / dark

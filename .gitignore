@@ -1,23 +1,26 @@
-.env
-backend/.venv/
-frontend/node_modules/
-frontend/dist/
-data/
+# Python
 __pycache__/
 *.pyc
-frontend/tsconfig.tsbuildinfo
-/dist-exe/
-/build-exe/
-NovelStudio.spec
+*.pyo
+.pytest_cache/
 
-# Claude / session artifacts
-.claude/
-.playwright-mcp/
-.superpowers/
-frontend/.superpowers/
+# 构建产物
+build/
+dist/
+*.spec.bak
 
-# Logs
-*.log
+# 用户数据（本地 SQLite 数据库、日志、嵌入模型缓存）
+data/
 
-# Session screenshots at repo root
-/*.png
+# IDE
+.idea/
+.vscode/
+
+# 环境
+.env
+venv/
+.venv/
+
+# 系统
+Thumbs.db
+.DS_Store
