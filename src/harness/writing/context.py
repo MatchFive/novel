@@ -563,7 +563,8 @@ def build_draft_context(store: ProjectStore, chapter_doc: ChapterDoc, plot: dict
       选段（BM25 + 读盘）是 CPU 密集活，调用方在 ``asyncio.to_thread`` 内算一次、
       每章一次（不是每拍一次）；本函数只拼块。缺省 "" → 不渲染该块。
     - materials 供 review/修正/deaify 复用:mem 给时八键（P3 五键 + related_events/
-      open_promises/rolling_summary；knowledge_state 尾部带世界现状块供审核复用）。
+      open_promises/rolling_summary；knowledge_state 尾部带世界现状块供审核复用）；
+      恒带 ``intent`` 键（P29/A3：只 review 消费，修正/去味不取——用户裁定）。
     """
     loader = _loader(store)
     base = loader.get("global.base_prompt")
@@ -679,6 +680,9 @@ def build_draft_context(store: ProjectStore, chapter_doc: ChapterDoc, plot: dict
         "pov_memories": bundle.pov_memories if bundle else "",
         "knowledge_state": knowledge_mat,
         "outline": beats_text(meta, beats),
+        # P29/A3（用户裁定）：意图块**只**并进 review（build_review_vars 消费）；
+        # 修正/去味的 vars 组装**不取**该键——对它们意图是噪音。
+        "intent": intent_block,
     }
     if bundle is not None:  # P4 五键激活（memory bundle 给时实填）
         materials["related_events"] = bundle.related_events
@@ -701,7 +705,16 @@ def context_select_vars(chapter_meta: dict, beats: list, catalog_str: str,
 
 
 def build_review_vars(materials: dict, chapter_seq, draft: str) -> dict:
-    """task.draft_review 变量组装（materials 五键直取,章序转文本）。"""
+    """task.draft_review 变量组装（materials 五键直取,章序转文本）。
+
+    ``intent``（P29/A3，用户裁定：并进 review、不进修正/去味）：整块预格式
+    （块头+body、前导 ``\\n\\n``），模板里 ``{{intent}}`` 贴行尾 → 空串时渲染结果
+    与无意图**逐字节相等**（不留下空块头/空行）。``materials`` 无该键 → 空串。
+    """
+    intent_body = _materials_lookup(materials, "intent")
+    intent = (f"\n\n【本次意图与范围（来自需求解析；审稿基准：意见不得与之相悖，"
+              f"正文直接违背「限制」的以 logic 类指出）】\n{intent_body}"
+              if intent_body else "")
     return {
         "chapter_seq": str(chapter_seq),
         "world_entries": _materials_lookup(materials, "world_entries"),
@@ -709,6 +722,7 @@ def build_review_vars(materials: dict, chapter_seq, draft: str) -> dict:
         "knowledge_state": _materials_lookup(materials, "knowledge_state"),
         "cast_cards": _materials_lookup(materials, "cast_cards"),
         "outline": _materials_lookup(materials, "outline"),
+        "intent": intent,
         "draft": draft or "",
     }
 

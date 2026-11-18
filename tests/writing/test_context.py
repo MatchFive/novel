@@ -25,7 +25,7 @@ _VAR_RE = re.compile(r"\{\{(\w+)\}\}")
 # 键集必须双向相等，防拼写漂移）
 CONTEXT_SELECT_VARS = {"objective", "beats", "target_beat", "catalog"}
 REVIEW_VARS = {"chapter_seq", "world_entries", "pov_memories", "knowledge_state",
-               "cast_cards", "outline", "draft"}
+               "cast_cards", "outline", "draft", "intent"}
 REVISE_VARS = {"issues", "flavor_hits", "outline", "world_entries", "cast_cards",
                "pov_memories", "knowledge_state", "draft"}
 REWRITE_BEAT_VARS = {"outline", "prev_text", "beat_text", "next_text", "issues"}
@@ -209,10 +209,11 @@ def test_build_draft_context_core_blocks(store):
     assert not _VAR_RE.search(dc.user)
     assert "【视点角色经历档案】" not in dc.user
     assert "【前情提要】" not in dc.user
-    # materials 五键（review/修正/deaify 复用）
+    # materials 五键（review/修正/deaify 复用）+ intent（P29：只 review 消费）
     assert set(dc.materials) == {"world_entries", "cast_cards", "pov_memories",
-                                 "knowledge_state", "outline"}
+                                 "knowledge_state", "outline", "intent"}
     assert "甲上山拜师" in dc.materials["outline"]
+    assert dc.materials["intent"] == ""        # 未传 intent_block → 空串
 
 
 def test_budget_trim_drops_droppable_keeps_core(store, monkeypatch):
@@ -321,6 +322,39 @@ def test_build_review_vars_key_set():
     assert out["outline"].startswith("情节（按顺序扩写）")
 
 
+def test_build_review_vars_intent_block():
+    """**P29**：意图块（materials["intent"]）→ review 变量的**整块预格式**。
+
+    有内容 → 块头+body、前导 \n\n（模板行尾紧贴，渲染出空行隔开）；
+    无/空 → ""（模板 {{intent}} 贴行尾 → 空值渲染**逐字节同改前**）。
+    """
+    m = {**_materials(), "intent": "目标：写一部长篇仙侠\n前提：少年修道成仙"}
+    out = context.build_review_vars(m, 3, "待审正文")
+    assert out["intent"].startswith(
+        "\n\n【本次意图与范围（来自需求解析；审稿基准：意见不得与之相悖")
+    assert "目标：写一部长篇仙侠" in out["intent"]
+    assert "少年修道成仙" in out["intent"]
+    # 无 intent 键 / 空串 → ""（review 提示词零变化）
+    assert context.build_review_vars(_materials(), 3, "x")["intent"] == ""
+    assert context.build_review_vars({**_materials(), "intent": ""}, 3, "x")["intent"] == ""
+
+
+def test_build_review_intent_empty_render_byte_identical():
+    """空意图时 task.draft_review 渲染结果 = 模板**整块拔掉** {{intent}} 后的渲染
+    （字节级：不留块头、不留空行）。"""
+    from harness.prompts.loader import PromptLoader
+    loader = PromptLoader()
+    vars_ = context.build_review_vars(_materials(), 3, "x")
+    tpl = loader.get("task.draft_review").replace("{{intent}}", "")
+    expected = tpl
+    for k, v in vars_.items():
+        if k != "intent":
+            expected = expected.replace("{{" + k + "}}", v)
+    out = loader.render("task.draft_review", **vars_)
+    assert out == expected
+    assert "【本次意图与范围" not in out
+
+
 def test_build_revise_vars_key_set():
     issues = [{"type": "logic", "fix_kind": "rewrite", "issue": "因果颠倒",
                "quote": "", "replacement": "", "suggestion": "先因后果"}]
@@ -384,7 +418,7 @@ def test_context_mem_none_backwards_compatible(store):
     dc = context.build_draft_context(store, _p4_doc(), _plot(), BEATS,
                                      prev_tail="", selected=_selected())
     assert set(dc.materials) == {"world_entries", "cast_cards", "pov_memories",
-                                 "knowledge_state", "outline"}
+                                 "knowledge_state", "outline", "intent"}
     assert dc.materials["pov_memories"] == "" and dc.materials["knowledge_state"] == ""
     for head in ("【视点角色经历档案】", "【知识状态", "【相关历史事件】",
                  "【未回收承诺/伏笔提醒】", "【前情提要】", "【其他角色相关经历】",
@@ -419,9 +453,10 @@ def test_context_mem_fills_materials_and_blocks(store):
                                      prev_tail="", selected=_selected(),
                                      mem=mem, index=index)
     # materials：旧五键 + P4 三新键（related_events/open_promises/rolling_summary）
+    # + intent（P29：只 review 消费；修正/去味 vars 组装不取该键——用户裁定）
     assert set(dc.materials) == {"world_entries", "cast_cards", "pov_memories",
                                  "knowledge_state", "outline", "related_events",
-                                 "open_promises", "rolling_summary"}
+                                 "open_promises", "rolling_summary", "intent"}
     # 五块进 user（带时间锚点）
     assert "【视点角色经历档案】\n· [第1章] 甲上山拜师" in dc.user
     assert "【知识状态（严格遵守）】\n· 血脉图谱：甲 知道（第1章起）" in dc.user

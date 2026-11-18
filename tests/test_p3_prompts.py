@@ -35,7 +35,7 @@ VAR_CONTRACT = {
     },
     "task.draft_review": {
         "chapter_seq", "world_entries", "pov_memories", "knowledge_state",
-        "cast_cards", "outline", "draft",
+        "cast_cards", "outline", "draft", "intent",
     },
     "task.draft_revise": {
         "issues", "flavor_hits", "outline", "world_entries", "cast_cards",

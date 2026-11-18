@@ -226,6 +226,43 @@ async def test_p12_intent_block_in_writing_prompt(store, make_llm):
     assert "只规划前" not in joined
 
 
+async def test_p29_intent_block_in_review_not_in_revise_deaify(store, make_llm):
+    """**P29/A3**（用户裁定：并进 review，不进修正/去味）：意图块进 **draft_review**
+    提示词（含目标/正文范围行）；**修正/去味**提示词（若出现）一律不含。
+
+    裁定理由：修正/去味只处理审稿已判出的具体问题（quote 定位），
+    意图对它们是噪音；审出来的意见不得与意图相悖。
+    """
+    from harness.run.state import RunState
+
+    write_chapters(store, [chapter(1, "题一", beats("一之起", "一之承"))])
+    state = RunState.new("写个仙侠", ["outline"])
+    state.brief.update({"goal": "写一部长篇仙侠", "premise": "少年修道成仙",
+                         "constraints": ["每章 3000 字"], "write_target": "只写第一卷"})
+    state.save(store.root)
+
+    llm, calls = make_llm(default_router)
+    collector = Collector()
+    await run_tool(store, llm, collector, {"plot_id": "1-1"})
+
+    HEADER = "【本次意图与范围（来自需求解析；审稿基准"
+    review_prompts, fix_prompts = [], []
+    for body in calls:
+        prompt = body["messages"][-1]["content"]
+        if "【待审正文】" in prompt:
+            review_prompts.append(prompt)
+        if "【待修正正文】" in prompt or "【待去味正文】" in prompt:
+            fix_prompts.append(prompt)
+    assert review_prompts, "写作链里没有 review 调用（测试前提崩了）"
+    for prompt in review_prompts:                       # review（含 _recheck 复审）都有
+        assert HEADER in prompt
+        assert "目标：写一部长篇仙侠" in prompt
+        assert "正文范围：只写第一卷" in prompt
+    for prompt in fix_prompts:                          # 修正/去味（若被触发）一律没有
+        assert HEADER not in prompt
+        assert "目标：写一部长篇仙侠" not in prompt
+
+
 async def test_p20_writing_prompt_reports_unfoldable_range(store, make_llm):
     """**P20**：正文范围**折算不成确定范围**（排除语义）→ 写作提示词里**如实说明**。
 
