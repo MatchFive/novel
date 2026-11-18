@@ -1,0 +1,158 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]: novel-harness
+    - navigation [ref=f1e6]:
+      - button "事件流 495" [ref=f1e119] [cursor=pointer]:
+        - generic [ref=f1e8]: 事件流
+        - generic [ref=f1e9]: "495"
+      - button "大纲 4" [ref=f1e120] [cursor=pointer]:
+        - generic [ref=f1e11]: 大纲
+        - generic [ref=f1e12]: "4"
+      - button "章节 15" [ref=f1e121] [cursor=pointer]:
+        - generic [ref=f1e14]: 章节
+        - generic [ref=f1e15]: "15"
+      - button "正文 3" [ref=f1e122] [cursor=pointer]:
+        - generic [ref=f1e17]: 正文
+        - generic [ref=f1e18]: "3"
+      - button "角色 8" [ref=f1e123] [cursor=pointer]:
+        - generic [ref=f1e20]: 角色
+        - generic [ref=f1e21]: "8"
+      - button "记忆 15" [ref=f1e124] [cursor=pointer]:
+        - generic [ref=f1e23]: 记忆
+        - generic [ref=f1e24]: "15"
+      - button "问题 3" [ref=f1e125] [cursor=pointer]:
+        - generic [ref=f1e26]: 问题
+        - generic [ref=f1e27]: "3"
+    - generic [ref=f1e28]:
+      - generic [ref=f1e29]: 已完成
+      - generic [ref=f1e32]:
+        - button "暂停" [disabled] [ref=f1e33]
+        - button "继续" [disabled] [ref=f1e34]
+        - button "终止" [disabled] [ref=f1e35]
+    - generic [ref=f1e36]:
+      - generic [ref=f1e37]: 书架
+      - list [ref=f1e38]:
+        - listitem [ref=f1e39]:
+          - button "大道朝天" [ref=f1e40] [cursor=pointer]
+        - listitem [ref=f1e41]:
+          - button "验收-A1-outline" [ref=f1e42] [cursor=pointer]
+      - generic "大道朝天" [ref=f1e126]
+  - main [ref=f1e44]:
+    - generic [ref=f1e902]:
+      - heading "问题台账 全部状态" [level=2] [ref=f1e903]:
+        - text: 问题台账
+        - combobox [ref=f1e904]:
+          - option "全部状态" [selected]
+          - option "pending"
+          - option "resolved"
+          - option "ignored"
+      - generic [ref=f1e905]:
+        - heading "来源：checklist（8）" [level=3] [ref=f1e906]
+        - table [ref=f1e907]:
+          - rowgroup [ref=f1e908]:
+            - row [ref=f1e909]:
+              - columnheader "id" [ref=f1e910]
+              - columnheader "标题" [ref=f1e911]
+              - columnheader "状态" [ref=f1e912]
+              - columnheader "章" [ref=f1e913]
+              - columnheader "创建时间" [ref=f1e914]
+          - rowgroup [ref=f1e915]:
+            - row [ref=f1e916]:
+              - cell "0001" [ref=f1e917]
+              - cell [ref=f1e918]:
+                - group [ref=f1e919]:
+                  - generic "情节检查-每卷清单" [ref=f1e920]
+              - cell "resolved" [ref=f1e921]
+              - cell "–" [ref=f1e923]
+              - cell "2026-11-17 06:37:54" [ref=f1e924]
+            - row [ref=f1e925]:
+              - cell "0002" [ref=f1e926]
+              - cell [ref=f1e927]:
+                - group [ref=f1e928]:
+                  - generic "爽点密度-阶段标准" [ref=f1e929]
+              - cell "resolved" [ref=f1e930]
+              - cell "–" [ref=f1e932]
+              - cell "2026-11-17 06:37:54" [ref=f1e933]
+            - row [ref=f1e934]:
+              - cell "0003" [ref=f1e935]
+              - cell [ref=f1e936]:
+                - group [ref=f1e937]:
+                  - generic "情节是否按计划完成（节拍覆盖、收束到位）" [ref=f1e938]
+              - cell "resolved" [ref=f1e939]
+              - cell "–" [ref=f1e941]
+              - cell "2026-11-17 06:37:54" [ref=f1e942]
+            - row [ref=f1e943]:
+              - cell "0004" [ref=f1e944]
+              - cell [ref=f1e945]:
+                - group [ref=f1e946]:
+                  - generic "是否违反限制" [ref=f1e947]
+              - cell "resolved" [ref=f1e948]
+              - cell "–" [ref=f1e950]
+              - cell "2026-11-17 06:37:54" [ref=f1e951]
+            - row [ref=f1e952]:
+              - cell "0005" [ref=f1e953]
+              - cell [ref=f1e954]:
+                - group [ref=f1e955]:
+                  - generic "章节间衔接与一致性" [ref=f1e956]
+              - cell "resolved" [ref=f1e957]
+              - cell "–" [ref=f1e959]
+              - cell "2026-11-17 06:37:54" [ref=f1e960]
+            - row [ref=f1e961]:
+              - cell "0006" [ref=f1e962]
+              - cell [ref=f1e963]:
+                - group [ref=f1e964]:
+                  - generic "伏笔是否推进" [ref=f1e965]
+              - cell "resolved" [ref=f1e966]
+              - cell "–" [ref=f1e968]
+              - cell "2026-11-17 06:37:54" [ref=f1e969]
+            - row [ref=f1e970]:
+              - cell "0008" [ref=f1e971]
+              - cell [ref=f1e972]:
+                - group [ref=f1e973]:
+                  - generic "爽点密度-阶段标准" [ref=f1e974]
+              - cell "pending" [ref=f1e975]
+              - cell "–" [ref=f1e977]
+              - cell "2026-11-17 23:30:10" [ref=f1e978]
+            - row [ref=f1e979]:
+              - cell "0010" [ref=f1e980]
+              - cell [ref=f1e981]:
+                - group [ref=f1e982]:
+                  - generic "③ 效果质量" [ref=f1e983]
+              - cell "pending" [ref=f1e984]
+              - cell "–" [ref=f1e986]
+              - cell "2026-11-17 23:32:52" [ref=f1e987]
+      - generic [ref=f1e988]:
+        - heading "来源：check（2）" [level=3] [ref=f1e989]
+        - table [ref=f1e990]:
+          - rowgroup [ref=f1e991]:
+            - row [ref=f1e992]:
+              - columnheader "id" [ref=f1e993]
+              - columnheader "标题" [ref=f1e994]
+              - columnheader "状态" [ref=f1e995]
+              - columnheader "章" [ref=f1e996]
+              - columnheader "创建时间" [ref=f1e997]
+          - rowgroup [ref=f1e998]:
+            - row [ref=f1e999]:
+              - cell "0007" [ref=f1e1000]
+              - cell [ref=f1e1001]:
+                - group [ref=f1e1002]:
+                  - generic "前期标准要求每章1个小爽点，但第1章以测灵被判下下、雨中负石滑倒见血仍绑石前行收" [ref=f1e1003]
+              - cell "resolved" [ref=f1e1004]
+              - cell "1" [ref=f1e1006]
+              - cell "2026-11-17 23:30:10" [ref=f1e1007]
+            - row [ref=f1e1008]:
+              - cell "0009" [ref=f1e1009]
+              - cell [ref=f1e1010]:
+                - group [ref=f1e1011]:
+                  - generic "第1章开篇以送药、盘货、抽烟等日常铺陈进入，测灵受挫与负石见血的核心冲突后置，章" [active] [ref=f1e1012]
+                  - generic [ref=f1e1017]:
+                    - paragraph [ref=f1e1018]: pacing：第1章开篇以送药、盘货、抽烟等日常铺陈进入，测灵受挫与负石见血的核心冲突后置，章末未给可感知小回报；与前期每章1小爽点标准及未决[0007][0008]不符。；建议：修订第1章开篇与负石收束段：压缩送药/盘货铺陈，把测灵冲突提前；并在负石受挫后补一个不改变“下下灵根”判定的小回报（如周秉或杂役一句认可、旁人态度变化），使第1章形成1个可感知小爽点。
+                    - blockquote [ref=f1e1019]: 掌柜蹲回去继续抽烟，抽了两口，像是想起来什么
+                    - button "跳到正文" [ref=f1e1021] [cursor=pointer]
+                    - generic [ref=f1e1022]:
+                      - button "已解决" [ref=f1e1023] [cursor=pointer]
+                      - button "忽略" [ref=f1e1024] [cursor=pointer]
+                      - button "交给 AI 修" [ref=f1e1025] [cursor=pointer]
+              - cell "pending" [ref=f1e1013]
+              - cell "1" [ref=f1e1015]
+              - cell "2026-11-17 23:32:52" [ref=f1e1016]

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "novel-harness"
+version = "0.1.0"
+description = "终端小说写作 harness（local-harness P0 骨架）"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=1.79",
+    "fastapi>=0.115",
+    "httpx>=0.28",
+    "pyyaml>=6",
+    "uvicorn[standard]>=0.34",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[project.scripts]
+harness = "harness.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+harness = ["prompts/builtin/*.md"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 110

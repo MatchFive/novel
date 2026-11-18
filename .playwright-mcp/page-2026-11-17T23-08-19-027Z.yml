@@ -1,0 +1,58 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]: novel-harness
+    - navigation [ref=e6]:
+      - button "事件流 2" [ref=e564] [cursor=pointer]:
+        - generic [ref=e8]: 事件流
+        - generic [ref=e9]: "2"
+      - button "大纲 0" [ref=e565] [cursor=pointer]:
+        - generic [ref=e11]: 大纲
+        - generic [ref=e12]: "0"
+      - button "章节 0" [ref=e566] [cursor=pointer]:
+        - generic [ref=e14]: 章节
+        - generic [ref=e15]: "0"
+      - button "正文 0" [ref=e567] [cursor=pointer]:
+        - generic [ref=e17]: 正文
+        - generic [ref=e18]: "0"
+      - button "角色 0" [ref=e568] [cursor=pointer]:
+        - generic [ref=e20]: 角色
+        - generic [ref=e21]: "0"
+      - button "记忆 0" [ref=e569] [cursor=pointer]:
+        - generic [ref=e23]: 记忆
+        - generic [ref=e24]: "0"
+      - button "问题 0" [ref=e570] [cursor=pointer]:
+        - generic [ref=e26]: 问题
+        - generic [ref=e27]: "0"
+    - generic [ref=e28]:
+      - generic [ref=e29]: running
+      - generic [ref=e32]:
+        - button "暂停" [disabled] [ref=e33]
+        - button "继续" [disabled] [ref=e34]
+        - button "终止" [disabled] [ref=e35]
+    - generic [ref=e36]:
+      - generic [ref=e37]: 书架
+      - list [ref=e38]:
+        - listitem [ref=e39]:
+          - button "大道朝天" [ref=e40] [cursor=pointer]
+        - listitem [ref=e41]:
+          - button "验收-A1-outline" [active] [ref=e42] [cursor=pointer]
+      - generic "验收-a1-outline" [ref=e571]: 验收-A1-outline
+  - main [ref=e44]:
+    - generic [ref=e45]:
+      - heading "事件流" [level=2] [ref=e46]
+      - generic [ref=e47]:
+        - textbox "向 harness 描述本次写作任务……" [ref=e49]
+        - generic [ref=e50]:
+          - textbox "可用交付物：outline（大纲）/ chapters（章节规划）/ prose（正文）/ 等，逗号分隔；缺省 outline" [ref=e51]
+          - button "起 run" [disabled] [ref=e52]
+      - generic [ref=e53]:
+        - button "全展开" [ref=e54] [cursor=pointer]
+        - button "全折叠" [ref=e55] [cursor=pointer]
+        - generic [ref=e572]: 已连接 · 验收-a1-outline · last_seq 2 · 缓冲 2 条
+      - generic [ref=e57]:
+        - generic [ref=e573]: ▶ run 开始 · 交付物：outline写一个东方仙侠中篇的大纲：寒门少年从杂役弟子起步踏上修仙路，基调冷峻克制。先规划卷骨架与第一卷的逐卷情节、拆章细纲即可，规模中等（一到两卷起步）。
+        - generic [ref=e574]:
+          - button "▶💭 思考 · agent_step · seq 2 · 156 字" [ref=e575] [cursor=pointer]:
+            - text: ▶
+            - generic [ref=e576]: 💭 思考 · agent_step · seq 2 · 156 字
+          - generic [ref=e577]: 💬 先把这个大纲任务拆成可核对的几步

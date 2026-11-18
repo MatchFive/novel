@@ -1,0 +1,12 @@
+# 仓级行尾策略：文本一律 **LF** 入库、**LF** 检出。
+#
+# 为什么（2026-11-17，P19）：`core.autocrlf=true`（Windows 默认）会把工作树写成
+# CRLF → ① 仓内提示词模板与 **seed 底本逐字节不等**（移植纪律说「正文一个字都不许
+# 改」，行尾也得算进去——此前比对测试用 `_lf()` 归一**绕开**了这件事，等于把漂移
+# 藏起来）；② 同一份仓在 Windows / Linux 上落盘行尾不同 → 跨平台行为漂移。
+#
+# `*.md` 是重点：`src/harness/prompts/builtin/*.md` 是**逐字移植**的 seed 模板，
+# `tests/fixtures/seed/*.md` 是它的仓内底本（比对基准）。
+*.py text eol=lf
+*.md text eol=lf
+.gitattributes text eol=lf

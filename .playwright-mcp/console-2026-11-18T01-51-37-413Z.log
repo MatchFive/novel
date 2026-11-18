@@ -1,0 +1,11 @@
+[  141888ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/stream?after=244:1
+[  142891ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/stream?after=263:1
+[  143345ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/state:1
+[  143896ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/stream?after=263:1
+[  144897ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/stream?after=263:1
+[  145351ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/state:1
+[  145901ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/stream?after=263:1
+[  146903ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/stream?after=263:1
+[  147352ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/state:1
+[  147919ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/stream?after=263:1
+[  148933ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_REFUSED @ http://127.0.0.1:8849/api/project/%E9%AA%8C%E6%94%B6-a1-outline/stream?after=263:1

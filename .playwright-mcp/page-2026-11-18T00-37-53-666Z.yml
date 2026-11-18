@@ -1,0 +1,52 @@
+- generic [ref=f2e3]:
+  - complementary [ref=f2e4]:
+    - generic [ref=f2e5]: novel-harness
+    - navigation [ref=f2e6]:
+      - button "事件流 –" [ref=f2e7] [cursor=pointer]:
+        - generic [ref=f2e8]: 事件流
+        - generic [ref=f2e9]: –
+      - button "大纲 –" [ref=f2e10] [cursor=pointer]:
+        - generic [ref=f2e11]: 大纲
+        - generic [ref=f2e12]: –
+      - button "章节 –" [ref=f2e13] [cursor=pointer]:
+        - generic [ref=f2e14]: 章节
+        - generic [ref=f2e15]: –
+      - button "正文 –" [ref=f2e16] [cursor=pointer]:
+        - generic [ref=f2e17]: 正文
+        - generic [ref=f2e18]: –
+      - button "角色 –" [ref=f2e19] [cursor=pointer]:
+        - generic [ref=f2e20]: 角色
+        - generic [ref=f2e21]: –
+      - button "记忆 –" [ref=f2e22] [cursor=pointer]:
+        - generic [ref=f2e23]: 记忆
+        - generic [ref=f2e24]: –
+      - button "问题 –" [ref=f2e25] [cursor=pointer]:
+        - generic [ref=f2e26]: 问题
+        - generic [ref=f2e27]: –
+    - generic [ref=f2e28]:
+      - generic [ref=f2e29]: 无 run
+      - generic [ref=f2e32]:
+        - button "暂停" [disabled] [ref=f2e33]
+        - button "继续" [disabled] [ref=f2e34]
+        - button "终止" [disabled] [ref=f2e35]
+    - generic [ref=f2e36]:
+      - generic [ref=f2e37]: 书架
+      - list [ref=f2e38]:
+        - listitem [ref=f2e39]:
+          - button "大道朝天" [ref=f2e40] [cursor=pointer]
+        - listitem [ref=f2e41]:
+          - button "验收-A1-outline" [ref=f2e42] [cursor=pointer]
+      - generic "大道朝天" [ref=f2e43]
+  - main [ref=f2e44]:
+    - generic [ref=f2e45]:
+      - heading "事件流" [level=2] [ref=f2e46]
+      - generic [ref=f2e47]:
+        - textbox "向 harness 描述本次写作任务……" [ref=f2e49]
+        - generic [ref=f2e50]:
+          - textbox "可用交付物：outline（大纲）/ chapters（章节规划）/ prose（正文）/ 等，逗号分隔；缺省 outline" [ref=f2e51]
+          - button "起 run" [disabled] [ref=f2e52]
+      - generic [ref=f2e53]:
+        - button "全展开" [disabled] [ref=f2e54]
+        - button "全折叠" [ref=f2e55] [cursor=pointer]
+        - generic [ref=f2e56]: 连接中…
+      - paragraph [ref=f2e58]: （暂无事件——起个 run 就能看到员工在干什么）
