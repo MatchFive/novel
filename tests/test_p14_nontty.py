@@ -47,7 +47,7 @@ def test_approval_file_base_is_project_root(tmp_path, monkeypatch):
     seen: dict = {}
 
     class _SpyUI(ApprovalUI):
-        def wait_for_answer(self, answer, *, count, multi):
+        def wait_for_answer(self, answer, *, count, multi, round=None):
             seen["answer_path"] = str(answer)
             seen["pending_exists"] = (base / "pending.md").exists()
             return Choice(indices=[0])
@@ -72,7 +72,7 @@ def test_approval_pending_is_written_to_file_base(tmp_path):
     seen: dict = {}
 
     class _SpyUI(ApprovalUI):
-        def wait_for_answer(self, answer, *, count, multi):
+        def wait_for_answer(self, answer, *, count, multi, round=None):
             seen["pending_exists"] = (base / "pending.md").exists()
             seen["answer_path"] = str(answer)
             return Choice(indices=[1])
@@ -137,7 +137,7 @@ def test_non_tty_approval_uses_file_protocol(tmp_path, monkeypatch):
     seen: dict = {}
 
     class _SpyUI(type(ui)):
-        def wait_for_answer(self, answer, *, count, multi):
+        def wait_for_answer(self, answer, *, count, multi, round=None):
             seen["answer_path"] = str(answer)
             return Choice(indices=[0])
 

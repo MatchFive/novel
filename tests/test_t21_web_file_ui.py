@@ -13,9 +13,16 @@ import time
 
 from harness.config import Settings
 from harness.projects import create_project
-from harness.run.approval import ApprovalCancelled
+from harness.run.approval import ApprovalCancelled, read_pending_round
 from harness.session import RunSession
 from harness.store.project import ProjectStore
+
+
+def _cancel_text(base) -> str:
+    """协议 v2（B3）：取消也带轮次（照抄 pending.md 头）；无头时退化为裸 c。"""
+    p = base / "pending.md"
+    tok = read_pending_round(p.read_text(encoding="utf-8")) if p.exists() else None
+    return f"round:{tok}\nc\n" if tok else "c\n"
 
 
 class _TtyStdin:
@@ -57,13 +64,13 @@ def test_session_force_file_ui_ignores_tty_stdin(tmp_path, monkeypatch):
                 break
             time.sleep(0.005)
         assert (base / "pending.md").exists()          # TTY stdin 下 pending.md 照样落地
-        (base / "pending.answer").write_text("c\n", encoding="utf-8")
+        (base / "pending.answer").write_text(_cancel_text(base), encoding="utf-8")
         thread.join(timeout=5)
         assert not thread.is_alive()
         assert outcome.get("cancelled")                # 等到的是文件答案，不是终端 EOF
     finally:
         if thread.is_alive():                          # 防挂死：兜底给答案
-            (base / "pending.answer").write_text("c\n", encoding="utf-8")
+            (base / "pending.answer").write_text(_cancel_text(base), encoding="utf-8")
             thread.join(timeout=5)
 
 

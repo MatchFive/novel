@@ -4,7 +4,7 @@
 带 deliverables）→ 新 run（run_started 事件）→ AgentLoop.run()。新斜杠命令：
 /pause（落盘 paused）/resume（WorkMemory.rebuild 回放续跑）/abort /issues（逐条
 已解决/忽略/交给 AI 修——后者 P1 仅 stub 说明）/answer（非 TTY 审批：写
-pending.answer，Task 9 文件协议）。Ctrl+C = /pause 语义（run 进行中）。
+pending.answer，协议 v2 文件审批：答案首行带本轮轮次）。Ctrl+C = /pause 语义（run 进行中）。
 """
 from __future__ import annotations
 
@@ -75,7 +75,8 @@ _HELP = """可用命令：
   /check [plot|global] [editor]  验收（默认全书级；plot=情节级；editor=签约责编视角；只报不改）
   /skills      两级 skill 清单（项目级 + 用户级，项目级覆盖同名）
   /skill import <路径> [--project]  导入外部 skill（单文件或整目录；默认用户级）
-  /answer      非 TTY 审批应答：/answer 1 2 备注:...（写 .harness/pending.answer）
+  /answer      非 TTY 审批应答：/answer 1 2 备注:...（写 .harness/pending.answer，
+               首行自动带本轮轮次——迟到的回答不进下一轮）
   /help        显示本帮助
   /quit        退出
 其他无前缀输入视为自然语言 brief，直接进入员工主循环。"""
@@ -751,7 +752,8 @@ def _cmd_skill(sess: RunSession, arg: str) -> None:
 
 
 def _cmd_answer(sess: RunSession, arg: str) -> None:
-    """非 TTY 审批应答：写 .harness/pending.answer（Task 9 文件协议，第一行选项号、第二行备注）。
+    """非 TTY 审批应答：写 .harness/pending.answer（协议 v2/B3：首行 round:<本轮轮次>
+    自动从 pending.md 抄——run 只收本轮的，迟到的回答不进下一轮）。
 
     备注按首个「 备注:」切分（而非空格 token 化）——备注里的多空格输入不被静默截断。
 

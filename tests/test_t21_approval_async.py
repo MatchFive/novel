@@ -16,12 +16,18 @@ from harness.agent.loop import AgentLoop
 from harness.config import ProviderConfig, Settings
 from harness.projects import create_project
 from harness.prompts.loader import PromptLoader
-from harness.run.approval import ApprovalCancelled, ApprovalUI
+from harness.run.approval import ApprovalCancelled, ApprovalUI, read_pending_round
 from harness.run.events import EventLog
 from harness.run.memory import WorkMemory
 from harness.run.state import RunState
 from harness.store.project import ProjectStore
 from harness.tools import readonly_registry, register_modify_tools, register_outline_tools
+
+
+def _stamped(base: Path, body: str) -> str:
+    """协议 v2（B3）：答案须带 pending.md 头里的 round——run 只收本轮的。"""
+    tok = read_pending_round((base / "pending.md").read_text(encoding="utf-8"))
+    return f"round:{tok}\n{body}" if tok else body
 
 # ------------------------------------------------------------------ ApprovalUI 级
 
@@ -51,7 +57,7 @@ def test_ask_async_file_wait_does_not_block_loop(tmp_path):
             progress_at_suspend = progress
             await asyncio.sleep(0.05)
             assert progress > progress_at_suspend      # 关键断言：等待没有占死 loop
-            (base / "pending.answer").write_text("1\n", encoding="utf-8")
+            (base / "pending.answer").write_text(_stamped(base, "1\n"), encoding="utf-8")
             choice = await asyncio.wait_for(ask_task, timeout=5)
             assert choice.indices == [0]
             assert progress >= 3
@@ -75,7 +81,7 @@ def test_ask_async_cancel_via_file(tmp_path):
             if (base / "pending.md").exists():
                 break
             await asyncio.sleep(0.005)
-        (base / "pending.answer").write_text("c\n", encoding="utf-8")
+        (base / "pending.answer").write_text(_stamped(base, "c\n"), encoding="utf-8")
         with pytest.raises(ApprovalCancelled):
             await asyncio.wait_for(ask_task, timeout=5)
 
@@ -167,7 +173,7 @@ def test_loop_ask_user_suspends_without_blocking_loop(tmp_path, capsys):
             progress_at_suspend = progress
             await asyncio.sleep(0.05)
             assert progress > progress_at_suspend      # loop 未被占死
-            (base / "pending.answer").write_text("2\n", encoding="utf-8")
+            (base / "pending.answer").write_text(_stamped(base, "2\n"), encoding="utf-8")
             result = await asyncio.wait_for(run_task, timeout=10)
             assert result.status == "done" and state.status == "done"
             assert progress >= 3

@@ -10,10 +10,21 @@ from harness.run.approval import (
     _render_pending,
     confirm_destructive,
     parse_answer_line,
+    read_pending_header,
+    read_pending_round,
     render_card,
     terminal_ask,
 )
 from harness.store.project import ProjectStore
+
+
+def _stamped(base, body: str) -> str:
+    """协议 v2（B3）：答案须带 pending.md 头里的 round——run 只收本轮的。
+
+    测试里模拟 repl /answer 的真实行为：从 pending.md 抄轮次盖进答案文件。
+    """
+    tok = read_pending_round((base / "pending.md").read_text(encoding="utf-8"))
+    return f"round:{tok}\n{body}" if tok else body
 
 
 class FakeStdin:
@@ -158,7 +169,7 @@ def test_non_tty_path_forces_file_mode_and_cleans_up(tmp_path):
             if (base / "pending.md").exists():
                 break
             time.sleep(0.005)
-        answer.write_text("2\n备注:换个思路\n", encoding="utf-8")
+        answer.write_text(_stamped(base, "2\n备注:换个思路\n"), encoding="utf-8")
 
     t = threading.Thread(target=writer)
     t.start()
@@ -182,7 +193,7 @@ def test_file_mode_writes_pending_md_then_polls_answer(tmp_path):
     def writer():
         time.sleep(0.05)  # 等 ask 进入轮询、pending.md 已落盘
         captured["pending"] = (base / "pending.md").read_text(encoding="utf-8")
-        answer.write_text("1 3\n", encoding="utf-8")
+        answer.write_text(_stamped(base, "1 3\n"), encoding="utf-8")
 
     t = threading.Thread(target=writer)
     t.start()
@@ -202,9 +213,13 @@ def test_file_mode_poll_skips_invalid_then_accepts_valid(tmp_path):
     answer = base / "pending.answer"
 
     def writer():
-        answer.write_text("99\n", encoding="utf-8")  # 越界，轮询应忽略
+        for _ in range(200):
+            if (base / "pending.md").exists():
+                break
+            time.sleep(0.005)
+        answer.write_text(_stamped(base, "99\n"), encoding="utf-8")  # 越界，轮询应忽略
         time.sleep(0.05)
-        answer.write_text("2\n", encoding="utf-8")
+        answer.write_text(_stamped(base, "2\n"), encoding="utf-8")
 
     t = threading.Thread(target=writer)
     t.start()
@@ -225,7 +240,7 @@ def test_file_mode_cancel_marker_raises_and_cleans(tmp_path):
             if (base / "pending.md").exists():
                 break
             time.sleep(0.005)
-        (base / "pending.answer").write_text("取消\n", encoding="utf-8")
+        (base / "pending.answer").write_text(_stamped(base, "取消\n"), encoding="utf-8")
 
     t = threading.Thread(target=writer)
     t.start()
@@ -270,7 +285,7 @@ def test_ask_ignores_stale_preexisting_answer_sync(tmp_path):
     assert t.is_alive()
     assert "choice" not in result
     assert (base / "pending.md").exists()        # 问题还在等
-    (base / "pending.answer").write_text("2\n", encoding="utf-8")  # 本轮的真答案
+    (base / "pending.answer").write_text(_stamped(base, "2\n"), encoding="utf-8")  # 本轮的真答案
     t.join(timeout=5)
     assert not t.is_alive()
     assert result["choice"].indices == [1]
@@ -293,7 +308,7 @@ def test_ask_ignores_stale_preexisting_answer_async(tmp_path):
             await asyncio.sleep(0.005)
         assert (base / "pending.md").exists()
         assert not ask_task.done()               # 残留未被秒消费
-        (base / "pending.answer").write_text("2\n", encoding="utf-8")
+        (base / "pending.answer").write_text(_stamped(base, "2\n"), encoding="utf-8")
         choice = await asyncio.wait_for(ask_task, timeout=5)
         assert choice.indices == [1]
 
@@ -310,7 +325,7 @@ def test_cancel_marker_case_insensitive(tmp_path, marker):
             if (base / "pending.md").exists():
                 break
             time.sleep(0.005)
-        (base / "pending.answer").write_text(marker + "\n", encoding="utf-8")
+        (base / "pending.answer").write_text(_stamped(base, marker + "\n"), encoding="utf-8")
 
     t = threading.Thread(target=writer)
     t.start()
@@ -325,10 +340,13 @@ def test_non_tty_without_path_auto_degrades_to_cwd_dot_harness(tmp_path, monkeyp
     monkeypatch.chdir(tmp_path)
 
     def writer():
-        time.sleep(0.05)
+        for _ in range(200):
+            if (tmp_path / ".harness" / "pending.md").exists():
+                break
+            time.sleep(0.005)
         d = tmp_path / ".harness"
         d.mkdir(exist_ok=True)
-        (d / "pending.answer").write_text("1\n", encoding="utf-8")
+        (d / "pending.answer").write_text(_stamped(d, "1\n"), encoding="utf-8")
 
     t = threading.Thread(target=writer)
     t.start()
@@ -368,7 +386,7 @@ def test_file_mode_default_base_anchored_absolute_ignores_later_chdir(tmp_path, 
             if (base / "pending.md").exists():
                 break
             time.sleep(0.005)
-        (base / "pending.answer").write_text("1\n", encoding="utf-8")
+        (base / "pending.answer").write_text(_stamped(base, "1\n"), encoding="utf-8")
 
     t = threading.Thread(target=writer)
     t.start()
@@ -383,21 +401,202 @@ def test_file_mode_default_base_anchored_absolute_ignores_later_chdir(tmp_path, 
 
 
 def _write_pending(base, question="改吗？", options=("改", "不改"), multi=False):
-    """造一份与真实渲染同形的 pending.md。"""
+    """造一份与真实渲染同形的 pending.md（协议 v2：机器头带 round）→ 返回轮次。"""
+    import secrets
+
+    base.mkdir(parents=True, exist_ok=True)
+    tok = secrets.token_hex(8)
+    (base / "pending.md").write_text(
+        _render_pending(question, list(options), multi, round=tok), encoding="utf-8")
+    return tok
+
+
+# ---------- B3：迟到的 /answer 轮次竞态（协议 v2：答案带轮次，run 只收本轮的） ----------
+
+ROUND_A, ROUND_B = "a" * 16, "b" * 16
+
+
+def _pending_with_round(tmp_path, round_token=ROUND_A):
+    base = tmp_path / ".harness"
     base.mkdir(parents=True, exist_ok=True)
     (base / "pending.md").write_text(
-        _render_pending(question, list(options), multi), encoding="utf-8")
+        _render_pending("改吗？", ["改", "不改"], multi=False, round=round_token),
+        encoding="utf-8")
+    return base
+
+
+def test_pending_header_carries_round():
+    """_render_pending(round=…)：机器头带轮次；read_pending_round 取回；旧格式 → None。"""
+    text = _render_pending("q", ["a", "b"], multi=False, round=ROUND_A)
+    assert f"round={ROUND_A}" in text
+    assert read_pending_header(text) == (2, False)      # 旧解析口径不变
+    assert read_pending_round(text) == ROUND_A
+    legacy = _render_pending("q", ["a", "b"], multi=False)
+    assert read_pending_round(legacy) is None           # 旧格式无轮次
+
+
+def test_try_read_answer_accepts_current_round(tmp_path):
+    ui = ApprovalUI(poll_interval=0)
+    base = _pending_with_round(tmp_path)
+    (base / "pending.answer").write_text(f"round:{ROUND_A}\n2 备注:再想想\n",
+                                         encoding="utf-8")
+    choice = ui._try_read_answer(base / "pending.answer", count=2, multi=False,
+                                 round=ROUND_A)
+    assert choice is not None and choice.indices == [1] and choice.note == "再想想"
+
+
+@pytest.mark.parametrize("stale", [None, ROUND_B])
+def test_try_read_answer_rejects_stale_round_and_notes(tmp_path, stale):
+    """无轮次（旧格式/迟到回落路径）或别轮次 → **永不消费** + pending.md 里有说明（B3）。
+
+    拒收**不删文件**（非破坏；留给写入方看见，finally 统一清理）。
+    """
+    ui = ApprovalUI(poll_interval=0)
+    base = _pending_with_round(tmp_path)
+    body = "1\n" if stale is None else f"round:{stale}\n1\n"
+    (base / "pending.answer").write_text(body, encoding="utf-8")
+    choice = ui._try_read_answer(base / "pending.answer", count=2, multi=False,
+                                 round=ROUND_A)
+    assert choice is None
+    text = (base / "pending.md").read_text(encoding="utf-8")
+    assert "无效" in text and "轮次" in text
+    assert (base / "pending.answer").exists()
+
+
+def test_try_read_answer_round_none_keeps_legacy_acceptance(tmp_path):
+    """round=None（旧调用方/测试直调）→ 不校验轮次，裸答案照常收。"""
+    ui = ApprovalUI(poll_interval=0)
+    base = _pending_with_round(tmp_path)
+    (base / "pending.answer").write_text("1\n", encoding="utf-8")
+    choice = ui._try_read_answer(base / "pending.answer", count=2, multi=False)
+    assert choice is not None and choice.indices == [0]
+
+
+def test_b3_answer_from_previous_round_not_consumed_end_to_end(tmp_path):
+    """端到端 B3：第 1 轮答完 → 第 2 轮挂起；**带第 1 轮轮次**的迟到答案不得被收
+    （用户在第 1 轮结束后才敲的 /answer）；带本轮轮次的真答案照收。"""
+    base = tmp_path / ".harness"
+    ui = ApprovalUI(non_tty_path=base, poll_interval=0, stdin=FakeStdin(False))
+    rounds: dict = {}
+
+    def writer1():  # 第 1 轮：正常答掉，顺手记下它的轮次
+        for _ in range(200):
+            if (base / "pending.md").exists():
+                break
+            time.sleep(0.005)
+        rounds["r1"] = read_pending_round((base / "pending.md").read_text(encoding="utf-8"))
+        (base / "pending.answer").write_text(f"round:{rounds['r1']}\n1\n",
+                                             encoding="utf-8")
+
+    t1 = threading.Thread(target=writer1)
+    t1.start()
+    assert ui.ask("第一问", ["甲", "乙"]).indices == [0]
+    t1.join(timeout=5)
+    assert not t1.is_alive()
+
+    result: dict = {}
+
+    def asker2():
+        result["choice"] = ui.ask("第二问", ["丙", "丁"])
+
+    t2 = threading.Thread(target=asker2)
+    t2.start()
+    for _ in range(200):
+        if (base / "pending.md").exists():
+            break
+        time.sleep(0.005)
+    time.sleep(0.05)                        # 等 asker 进入轮询
+    (base / "pending.answer").write_text(f"round:{rounds['r1']}\n2\n",
+                                         encoding="utf-8")   # 上一轮的迟到答案
+    t2.join(timeout=0.3)
+    assert t2.is_alive(), "第 2 轮把上一轮的迟到答案收走了（B3 竞态复现）"
+    assert "choice" not in result
+    text = (base / "pending.md").read_text(encoding="utf-8")
+    assert "轮次" in text and "无效" in text
+    r2 = read_pending_round(text)
+    (base / "pending.answer").write_text(f"round:{r2}\n2\n", encoding="utf-8")
+    t2.join(timeout=5)
+    assert not t2.is_alive()
+    assert result["choice"].indices == [1]
+
+
+def test_b3_roundless_answer_during_live_ask_not_consumed(tmp_path):
+    """live 轮次里出现**无轮次**答案（repl 无 pending.md 回落路径「照写」的产物
+    在任何窗口留到轮询开始）→ 拒收 + 提示；本轮盖章答案照收。"""
+    base = tmp_path / ".harness"
+    ui = ApprovalUI(non_tty_path=base, poll_interval=0, stdin=FakeStdin(False))
+    result: dict = {}
+
+    def asker():
+        result["choice"] = ui.ask("问题？", ["甲", "乙"])
+
+    t = threading.Thread(target=asker)
+    t.start()
+    for _ in range(200):
+        if (base / "pending.md").exists():
+            break
+        time.sleep(0.005)
+    time.sleep(0.05)
+    (base / "pending.answer").write_text("1\n", encoding="utf-8")   # 无轮次
+    t.join(timeout=0.3)
+    assert t.is_alive(), "无轮次答案被 live 轮次收走了（B3）"
+    text = (base / "pending.md").read_text(encoding="utf-8")
+    assert "无效" in text and "轮次" in text
+    (base / "pending.answer").write_text(_stamped(base, "2\n"), encoding="utf-8")
+    t.join(timeout=5)
+    assert not t.is_alive()
+    assert result["choice"].indices == [1]
+
+
+def test_write_answer_stamps_round(tmp_path):
+    """write_answer 从 pending.md 机器头抄轮次盖进答案文件（协议 v2）。"""
+    from harness.run.approval import write_answer
+
+    base = tmp_path / ".harness"
+    tok = _write_pending(base)
+    write_answer(base, indices=[2], note="先看看")
+    lines = (base / "pending.answer").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == f"round:{tok}"
+    assert lines[1] == "2" and lines[2] == "备注:先看看"
+
+
+def test_write_answer_legacy_pending_no_round(tmp_path):
+    """旧格式 pending.md（无轮次头）→ 写无轮次答案（兼容；waiter 以「旧格式」拒收并提示）。"""
+    from harness.run.approval import write_answer
+
+    base = tmp_path / ".harness"
+    base.mkdir(parents=True)
+    (base / "pending.md").write_text("# 待审批\n\n问题？\n\n1. 改\n2. 不改\n",
+                                     encoding="utf-8")
+    write_answer(base, indices=[1])
+    lines = (base / "pending.answer").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "1"
+
+
+def test_cancel_answer_stamps_round_when_pending_present(tmp_path):
+    """cancel_answer 照抄 pending.md 轮次（迟到的取消同样不得杀下一轮）；无 pending.md → 裸 c。"""
+    from harness.run.approval import cancel_answer
+
+    base = _pending_with_round(tmp_path)
+    cancel_answer(base)
+    lines = (base / "pending.answer").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == f"round:{ROUND_A}" and lines[1] == "c"
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    cancel_answer(bare)
+    assert (bare / "pending.answer").read_text(encoding="utf-8") == "c\n"
 
 
 def test_write_answer_valid(tmp_path):
     from harness.run.approval import write_answer
 
     base = tmp_path / ".harness"
-    _write_pending(base)
+    tok = _write_pending(base)
     echo = write_answer(base, indices=[2], note="先看看")
     lines = (base / "pending.answer").read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "2"
-    assert lines[1] == "备注:先看看"
+    assert lines[0] == f"round:{tok}"          # 协议 v2：首行轮次（/answer 自动抄）
+    assert lines[1] == "2"
+    assert lines[2] == "备注:先看看"
     assert "已写入 pending.answer：2" in echo and "先看看" in echo
 
 
@@ -423,7 +622,8 @@ def test_write_answer_single_multi_violation(tmp_path):
     assert not (base / "pending.answer").exists()
     _write_pending(base, options=("改", "不改"), multi=True)
     write_answer(base, indices=[1, 2])
-    assert (base / "pending.answer").read_text(encoding="utf-8").splitlines()[0] == "1 2"
+    lines = (base / "pending.answer").read_text(encoding="utf-8").splitlines()
+    assert lines[0].startswith("round:") and lines[1] == "1 2"
 
 
 def test_write_answer_missing_pending_raises(tmp_path):
@@ -472,4 +672,5 @@ def test_repl_answer_uses_shared_write(tmp_path, monkeypatch):
     monkeypatch.setattr(repl, "write_answer", spy)
     _cmd_answer(sess, "2 备注:同意")
     assert calls == [{"base": base, "indices": [2], "note": "同意"}]
-    assert (base / "pending.answer").read_text(encoding="utf-8").splitlines()[0] == "2"
+    lines = (base / "pending.answer").read_text(encoding="utf-8").splitlines()
+    assert lines[0].startswith("round:") and lines[1] == "2"
