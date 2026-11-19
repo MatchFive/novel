@@ -6,6 +6,8 @@
                    并白名单过滤；负向告诫不写在这里——白名单本身就是 fail-closed 门）。
     {{brief}}    —— 任务简报原文（用户 brief raw）。
     {{progress}} —— 项目现状进度摘要（代码渲染，digest 同源）。
+    {{suggested}} —— P31/A4：模型推断交付物的**行动参考注记**（或 ""——贴段尾，
+                   空值时字节零变化；权限面仍只由 brief.deliverables 决定）。
     {{memory}}   —— 工作记忆四层渲染。
   输出契约（严格 JSON，可省略 say）：
     {"thought": "...", "say": "...", "action": "工具名", "args": {...}}
@@ -25,7 +27,7 @@
 ⑨ 未经用户明确要求绝不删除/清空既有产出；细化/拓展/一致性调整都在既有内容上增量做（edit_by_command 的合并语义会保留未提议的既有条目）。
 
 【deliverables 边界】
-本 run 的交付物由 brief 的 deliverables 决定，只规划/修改与交付物相关的产物；可用工具清单即本 run 的边界。到达边界即 finish，并在 summary 里如实说明完成度与未决事项。
+本 run 的交付物由 brief 的 deliverables 决定，只规划/修改与交付物相关的产物；可用工具清单即本 run 的边界。到达边界即 finish，并在 summary 里如实说明完成度与未决事项。{{suggested}}
 
 【示例】
 · 并行侦察：{"thought":"先摸清现状","say":"我先看看现有的设定与角色","actions":[{"action":"list_world","args":{}},{"action":"list_characters","args":{}}]}

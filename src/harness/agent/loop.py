@@ -354,8 +354,28 @@ class AgentLoop:
             brief=str(self.state.brief.get("raw") or ""),
             progress=progress_digest(self.store),
             memory=self.memory.render(),
+            suggested=self._suggested_note(),
         )
         return base + "\n\n" + step_tpl
+
+    def _suggested_note(self) -> str:
+        """**A4**：模型推断的交付物 → 步决策提示词里的**行动参考注记**（引导「做什么」）。
+
+        仅当 ``suggested_deliverables`` 非空且 ≠ 授权 deliverables 时渲染；注记明写
+        「可用工具与边界仍以 brief.deliverables 为准」——**权限面（能做什么）仍只由
+        用户定**（P10 复审 D2），推断不扩权（白名单 fail-closed 不变）。空串 →
+        模板 ``{{suggested}}`` 贴段尾，字节零变化。
+        """
+        suggested = [str(x) for x in (self.state.brief.get("suggested_deliverables") or [])
+                     if str(x).strip()]
+        authorized = [str(x) for x in (self.state.brief.get("deliverables")
+                                       or self.deliverables)]
+        if not suggested or suggested == authorized:
+            return ""
+        return ("（模型推断的交付物：" + "、".join(suggested)
+                + "——仅作行动参考：可优先朝这些产物组织推进，finish 时说明与"
+                  "授权面的差距；**本 run 可用工具与边界仍以 brief.deliverables 为准**，"
+                  "推断不改变权限面。）")
 
     def _tool_signatures(self, allowed) -> list[str]:
         names = (set(self.registry.names) | _FLOW_ACTIONS) & set(allowed)

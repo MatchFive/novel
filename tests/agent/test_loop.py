@@ -113,6 +113,40 @@ def _arcs_payload():
     ]}, ensure_ascii=False)
 
 
+# ---------- P31/A4：suggested_deliverables 的行为层用法（行动参考注记，不碰权限面） ----------
+
+
+def _step_prompt(store, brief_extra: dict, deliverables=("outline",)):
+    """组一帧步决策提示词（不走 LLM）：brief_extra 并进 state.brief 后直调 _build_prompt。"""
+    from harness.run.whitelist import allowed_for_run
+
+    state = RunState.new("brief 原文", list(deliverables))
+    state.brief.update(brief_extra)
+    loop, _llm, _events, state = make_loop(store, [], state=state, deliverables=deliverables)
+    allowed = allowed_for_run(list(state.brief.get("deliverables") or deliverables))
+    return loop._build_prompt(allowed)
+
+
+def test_p31_suggested_deliverables_guidance_in_step_prompt(store):
+    """**A4**：模型推断的交付物以**行动参考**注记进步决策提示词——引导「做什么」
+    （组织推进方向 / finish 说明差距），注记明写边界仍以 brief.deliverables 为准。"""
+    prompt = _step_prompt(store, {"suggested_deliverables": ["outline", "chapters"]},
+                          deliverables=("characters",))
+    assert "模型推断的交付物：outline、chapters" in prompt
+    assert "仍以 brief.deliverables 为准" in prompt
+    # **负向钉（P10 复审 D2）**：推断不扩权——characters 权限面没有 write_plot /
+    # plan_arcs 工具签名（edit_by_command 的说明文字提到 write_plot 不算）。
+    assert "- write_plot(args: {plot_id, seq_from?, seq_to?})" not in prompt
+    assert "plan_arcs(args" not in prompt
+
+
+def test_p31_no_guidance_when_suggested_absent_or_equal(store):
+    """无推断 / 推断与授权相同 → 注记为 ""（{{suggested}} 贴段尾 → 字节零变化）。"""
+    assert "模型推断的交付物" not in _step_prompt(store, {})
+    assert "模型推断的交付物" not in \
+        _step_prompt(store, {"suggested_deliverables": ["outline"]})
+
+
 def test_plan_arcs_then_finish_done(store, capsys):
     plan = {"tool_calls": [{"name": "plan_arcs",
                             "arguments": json.dumps({"instruction": "两卷骨架"})}]}
