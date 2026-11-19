@@ -64,6 +64,25 @@ _EXTRA_TRANSIENT_MARKERS = ("truncated", "starved")
 #: 0 产出的拒绝用它标记：判 noop（不涨有效步、涨 noop_streak），**不进**失败账。
 _NOPROGRESS_MARK = "NOPROGRESS:"
 
+#: P32/A8c：edit_by_command 全部提议越界时的观测首行（F1 修法 c 的触发形状）。
+#: 「提议内容与现状一致」「已取消」**不算**——前者不是选错工具，后者是人取消。
+_OUT_OF_SCOPE_ZERO_CHANGE = "edit_by_command：无范围内文件可应用（零变更）"
+
+#: 同类工具改试提示：观测保留原文，末尾追加一段给模型下一步的指路——把
+#: 「升级成 ask_user 要拍板」变成「改试 write_plot」。
+_ZERO_CHANGE_SIBLING_HINT = ("（同类工具提示：edit_by_command 只管 world.md / 角色卡 / "
+                             "卷骨架 / 情节——要动的若是章节正文/章卡，请改试 "
+                             "write_plot（args: {plot_id, seq_from?, seq_to?}）。）")
+
+
+def _zero_change_sibling_hint(obs: str) -> str:
+    """零变更撞墙 → 追加同类工具改试提示；其余观测逐字不动。"""
+    head = obs.splitlines()[0] if obs else ""
+    if head.startswith(_OUT_OF_SCOPE_ZERO_CHANGE):
+        return obs.rstrip("\n") + "\n" + _ZERO_CHANGE_SIBLING_HINT
+    return obs
+
+
 #: 逐工具结果的**严重度**序（failed 最重 → ok 最轻）。
 #: 同一工具在并行批里出现多次时取最重的那个（P21，独立复审 P17-2）。
 _OUTCOME_RANK = {"ok": 0, "noop": 1, "transient": 2, "failed": 3}
@@ -266,6 +285,7 @@ class AgentLoop:
                                 "write_plot", "extract_memory", "web_search",
                                 "check_plots", "global_check"):
                     obs, outcome, tool_usage = await self._async_tool(action, decision.args)
+                    obs = _zero_change_sibling_hint(obs)   # P32/A8c：撞「零变更」指路同类工具
                     per_tool = {action: outcome}
                 elif self.registry.has(action):
                     obs, outcome, recorded, per_tool = await self._sync_tool(
@@ -567,6 +587,11 @@ class AgentLoop:
         # 判 **noop**：不���有效步、**要**涨 noop_streak（连续无进展 → 暂停），
         # 且**不进**按工具分桶的失败账（否则会把工具冷却掉 → 合法目标也调不了）。
         if head.startswith(_NOPROGRESS_MARK):
+            return "noop"
+        # **P32/A8c**：edit_by_command 全部提议落在适用范围外（模型拿它改章节正文/章卡）
+        # → 同为 0 产出拒绝（M3 同口径：不算有效步、不进失败账）；观测另附同类工具
+        # 改试提示（``_zero_change_sibling_hint``），模型下一步据此改试 write_plot。
+        if head.startswith(_OUT_OF_SCOPE_ZERO_CHANGE):
             return "noop"
         return "ok"
 

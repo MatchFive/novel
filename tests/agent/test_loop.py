@@ -147,6 +147,48 @@ def test_p31_no_guidance_when_suggested_absent_or_equal(store):
         _step_prompt(store, {"suggested_deliverables": ["outline"]})
 
 
+# ---------- P32/A8c：撞「零变更」→ noop 分类 + 同类工具改试提示（F1 修法 c） ----------
+
+
+def test_p32_out_of_scope_zero_change_classified_noop():
+    """edit_by_command 全部提议越界（无范围内文件可应用）→ 0 产出拒绝：noop
+    （M3 口径：不算有效步、不进失败账——不把工具冷却掉）。"""
+    obs = "edit_by_command：无范围内文件可应用（零变更）\n拒绝：chapters/0001.md（不适用）"
+    assert AgentLoop._classify(obs) == "noop"
+
+
+def test_p32_other_zero_change_shapes_keep_ok():
+    """「内容与现状一致」非选错工具、「已取消」是人取消 → 分类不动（ok）。"""
+    assert AgentLoop._classify("edit_by_command：提议内容与现状一致（零变更）") == "ok"
+    assert AgentLoop._classify("edit_by_command：已取消，零变更（未写任何文件）") == "ok"
+
+
+def test_p32_zero_change_sibling_hint_appended(store, monkeypatch):
+    """loop 级：零变更观测落事件前追加「改试 write_plot」提示（模型下一步改试，
+    而不是升级成 ask_user 要拍板）。"""
+    from harness.agent import loop as loop_mod
+
+    edit_step = json.dumps({"thought": "改个章标题", "say": "改标题",
+                            "action": "edit_by_command",
+                            "args": {"instruction": "改第1章标题"}}, ensure_ascii=False)
+    loop, _llm, events, _state = make_loop(store, [edit_step, _finish()])
+    obs = "edit_by_command：无范围内文件可应用（零变更）\n拒绝：chapters/0001.md（不适用）"
+
+    async def fake_async_tool(action, args):
+        return obs, "noop", None
+
+    monkeypatch.setattr(loop, "_async_tool", fake_async_tool)
+    result = asyncio.run(loop.run())
+    assert result.status == "done"
+    recorded = [e for e in events.tail(100) if e["kind"] == "tool_result"][-1]
+    text = recorded["payload"]["observation"]
+    assert "edit_by_command：无范围内文件可应用（零变更）" in text   # 原观测保留
+    assert "write_plot" in text and "改试" in text                    # 同类提示在场
+    assert loop_mod._zero_change_sibling_hint("别的观测") == "别的观测"   # 非零变更不动
+    assert loop_mod._zero_change_sibling_hint(
+        "edit_by_command：提议内容与现状一致（零变更）") == "edit_by_command：提议内容与现状一致（零变更）"
+
+
 def test_plan_arcs_then_finish_done(store, capsys):
     plan = {"tool_calls": [{"name": "plan_arcs",
                             "arguments": json.dumps({"instruction": "两卷骨架"})}]}
