@@ -161,6 +161,42 @@ def test_edit_by_command_rejects_illegal_skill_name(store, make_llm):
     assert "skill 路径必须是 .harness/skills/<name>/SKILL.md" in obs2
 
 
+# ---------- P37（C3）：世界坐标注入（seed _world_variation 硬约束块） ----------
+
+
+def test_edit_by_command_world_target_appends_variation_block(store, make_llm):
+    """世界目标 instruction + 已存坐标 → propose 提示词追加【本次创作坐标…】硬约束块。"""
+    from harness.world_variation import write_variation
+
+    write_variation(store.root, {"core": "世界是补丁，他是洞", "metaphor": "补丁",
+                                 "medium": "以技艺为媒", "godstate": "沉睡",
+                                 "cost": "记忆可被交易"})
+    edits = json.dumps([{"path": "world.md", "content": "# 世界观\n\n## 地理｜补丁大地\n\n- 设定\n"}],
+                       ensure_ascii=False)
+    llm, calls = make_llm([edits])
+    ui = FakeUI(choice=Choice(indices=[0]))
+    reg = make_registry(store, llm, ui)
+    reg.execute("edit_by_command", {"instruction": "建一个补丁世界观"},
+                allowed=frozenset({"edit_by_command"}))
+    assert "【本次创作坐标" in calls[0]["messages"][-1]["content"]
+    assert "世界是补丁，他是洞" in calls[0]["messages"][-1]["content"]
+
+
+def test_edit_by_command_non_world_target_no_variation_block(store, make_llm):
+    """非世界目标（角色卡）→ 坐标块不进提示词。"""
+    from harness.world_variation import write_variation
+
+    write_variation(store.root, {"core": "世界是补丁", "metaphor": "补丁"})
+    edits = json.dumps([{"path": "characters/陆昭.md",
+                         "content": _alias_card(["昭哥", "昭公子"])}], ensure_ascii=False)
+    llm, calls = make_llm([edits])
+    ui = FakeUI(choice=Choice(indices=[0]))
+    reg = make_registry(store, llm, ui)
+    reg.execute("edit_by_command", {"instruction": "给陆昭加别名昭公子"},
+                allowed=frozenset({"edit_by_command"}))
+    assert "【本次创作坐标" not in calls[0]["messages"][-1]["content"]
+
+
 def test_edit_by_command_confirm_applies_alias(store, make_llm):
     old_bytes = _char_bytes(store)
     edits = json.dumps([{"path": "characters/陆昭.md",

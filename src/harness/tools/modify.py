@@ -323,6 +323,8 @@ async def edit_by_command(store: ProjectStore, llm: OpenAICompatClient, prompts:
     **现实参照预检**（P5 T10，裁定 18）：instruction 指向世界观且联网核查启用时，
     在 propose **渲染前**跑 ``task.auto_ref_check`` → 逐条核实 → 已核实结论以
     【已核实参照】块追加进提示词。**只回显真查到结论的**；预检失败不阻断修改路径。
+    **世界坐标**（P37，C3）：instruction 指向世界观且项目已存坐标时，再追加
+    【本次创作坐标…】硬约束块（seed ``_render_variation`` 逐字，设计 §1.3 ②）。
     """
     instruction = str(args.get("instruction") or "").strip()
     if not instruction:
@@ -332,10 +334,16 @@ async def edit_by_command(store: ProjectStore, llm: OpenAICompatClient, prompts:
     ref_block = await _ref_check_block(store=store, llm=llm, prompts=prompts,
                                        settings=settings, instruction=instruction,
                                        emit=emit)
+    # 世界坐标（P37，C3）：instruction 指向世界观且项目有已存坐标时，追加【本次创作坐标…】
+    # 硬约束块（seed _render_variation 逐字；生成入口是 REPL /worldcore）
+    coord_block = ""
+    if _world_targets(instruction):
+        from harness.world_variation import variation_block
+        coord_block = variation_block(store.root)
     prompt = prompts.render("task.auto_modify_propose",
                             files=_render_snapshot(snapshot), instruction=instruction) \
         + skill_injection(store.root, "task.auto_modify_propose") \
-        + ref_block
+        + ref_block + coord_block
     fail_reason = ""
 
     def _extract(text: str):

@@ -83,6 +83,8 @@ _HELP = """可用命令：
   /answer      非 TTY 审批应答：/answer 1 2 备注:...（写 .harness/pending.answer，
                首行自动带本轮轮次——迟到的回答不进下一轮）
   /snapshot    手动 git 快照（harness 快照：手动快照）
+  /worldcore [需求]  世界坐标（C3）：多候选→黑名单淘汰→跨 provider 评审→落盘；
+               之后世界类修改自动带【本次创作坐标】硬约束块（世界非空/已存坐标短路）
   /help        显示本帮助
   /quit        退出
 其他无前缀输入视为自然语言 brief，直接进入员工主循环。"""
@@ -311,6 +313,36 @@ def _cmd_snapshot(store: ProjectStore) -> None:
         print("未生成快照（无变更、git 不可用，或已失败并记录日志）")
     else:
         print(f"快照已提交：{commit}")
+
+
+def _cmd_worldcore(sess: RunSession, store: ProjectStore, arg: str) -> None:
+    """世界坐标（P37，C3）：seed ``_world_variation`` 本地兑现——多候选 → 黑名单淘汰 →
+    跨 provider 评审 → 落 ``.harness/world_variation.json``；世界有条目/已存坐标/正典
+    需求三路短路（见 resolve_variation docstring）。坐标经 edit_by_command 的世界目标
+    提示词注入【本次创作坐标…】硬约束块。可选参数 = 需求文本（缺省读 README 题材/基调/结局）。
+    """
+    from harness.prompts.loader import PromptLoader
+    from harness.world_variation import readme_premise, resolve_variation
+
+    comp = sess.make_components()
+    if comp is None:
+        print(_STUB_NOTICE)
+        return
+    premise = (arg or "").strip() or readme_premise(store.root)
+    picks, block = asyncio.run(resolve_variation(
+        store=store, settings=sess.settings, llm=comp.llm,
+        prompts=PromptLoader(home_dir=store.root),
+        premise=premise, constraints="（无）"))
+    if picks is None:
+        print("世界已有设定条目——用户内容就是这本书的坐标，未生成。"
+              "（如需重做：清空 world.md 条目并删除 .harness/world_variation.json 后再跑）")
+        return
+    print(block)
+    if picks.get("canon"):
+        print("（已落 canon 标记：本次及后续世界构建走题材正典，不追求原创意象）")
+    elif picks.get("judge_provider"):
+        print(f"评审：{picks['judge_provider']}——{picks.get('judge_reason', '')}")
+    print("坐标已写入 .harness/world_variation.json（世界非空/已存坐标时本命令零 LLM 短路）")
 
 
 # ------------------------------------------------------------------ run 会话（委托 harness.session）
@@ -905,6 +937,7 @@ def run_repl(project: ProjectInfo, store: ProjectStore, *, resume: bool = False,
         "/skills": lambda arg: _cmd_skills(sess),
         "/checklist": lambda arg: _cmd_checklist(store, arg),
         "/snapshot": lambda arg: _cmd_snapshot(store),
+        "/worldcore": lambda arg: _cmd_worldcore(sess, store, arg),
         "/skill": lambda arg: _cmd_skill(sess, arg),
         "/answer": lambda arg: _cmd_answer(sess, arg),
         "/help": lambda arg: print(_HELP),
