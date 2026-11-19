@@ -87,6 +87,9 @@ _HELP = """可用命令：
                之后世界类修改自动带【本次创作坐标】硬约束块（世界非空/已存坐标短路）
   /prompteval [all|<样例名>…]  提示词回归评估（C3）：黄金样例集重跑 → detect() 分数
                与上一快照量化对比（改提示词/换模型后用；只报告不裁决）
+  /stylecollect <路径> [--replace]  文风采集（C3）：样本文件 → 分片逐片 lite 标注 →
+               归纳 .harness/skills/style/SKILL.md（项目 style skill，写作自动注入；
+               片段落 .harness/style_fragments.json，默认追加，--replace 清零）
   /help        显示本帮助
   /quit        退出
 其他无前缀输入视为自然语言 brief，直接进入员工主循环。"""
@@ -382,6 +385,63 @@ def _cmd_prompteval(sess: RunSession, store: ProjectStore, arg: str) -> None:
     path = save_snapshot(store.root, results, model=comp.llm.provider.standard,
                          prompt_hashes=hashes)
     print(f"快照已写入 {path}（model={comp.llm.provider.standard}）")
+
+
+def _cmd_stylecollect(sess: RunSession, store: ProjectStore, arg: str) -> None:
+    """文风采集（P39，C3 收官项）：样本文件 → 分片逐片 lite 标注 → 全量重归纳 →
+    写 .harness/skills/style/SKILL.md（项目 style skill，写作经 collect_context 自动注入）。
+    用法：/stylecollect <路径> [--replace]（默认追加片段；--replace 清零覆盖）。
+    覆盖既有 style SKILL.md 时输出明示（P35 git 快照是后悔药）。
+    """
+    from harness.stylecollect import (
+        FRAGMENTS_PATH,
+        STYLE_SKILL_PATH,
+        StyleCollectError,
+        collect,
+        read_fragments,
+        split_chunks,
+    )
+
+    comp = sess.make_components()
+    if comp is None:
+        print(_STUB_NOTICE)
+        return
+    parts = (arg or "").split()
+    replace = "--replace" in parts
+    paths = [p for p in parts if p != "--replace"]
+    if not paths:
+        print("用法：/stylecollect <样本文件路径> [--replace]")
+        return
+    path = Path(paths[0])
+    if not path.is_file():
+        print(f"样本文件不存在：{path}")
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"样本文件读取失败：{type(exc).__name__}: {exc}")
+        return
+    if not split_chunks(text):
+        print("样本内容为空（分片后无有效正文）。")
+        return
+    if replace and (Path(store.root) / STYLE_SKILL_PATH).is_file():
+        print("注意：--replace 将清零片段库并覆盖既有 style 文风档案（git 快照可回滚）。")
+    from harness.prompts.loader import PromptLoader
+
+    try:
+        summary = asyncio.run(collect(
+            store=store, llm=comp.llm, prompts=PromptLoader(home_dir=store.root),
+            text=text, replace=replace))
+    except StyleCollectError as exc:
+        print(f"文风采集失败：{exc}")
+        return
+    for f in read_fragments(store.root)[-summary["kept"]:]:
+        print(f"  [{f['category']}] {f['note']}")
+    mode = "覆盖" if replace else "追加"
+    print(f"本次 {summary['chunks']} 片（保留 {summary['kept']}，{mode}）；"
+          f"片段库共 {summary['total_chunks']} 片 / {summary['source_chars']:,} 字")
+    print(f"文风档案已写入 {STYLE_SKILL_PATH}（项目 style skill，写作自动注入）；"
+          f"片段落 {FRAGMENTS_PATH}")
 
 
 # ------------------------------------------------------------------ run 会话（委托 harness.session）
@@ -978,6 +1038,7 @@ def run_repl(project: ProjectInfo, store: ProjectStore, *, resume: bool = False,
         "/snapshot": lambda arg: _cmd_snapshot(store),
         "/worldcore": lambda arg: _cmd_worldcore(sess, store, arg),
         "/prompteval": lambda arg: _cmd_prompteval(sess, store, arg),
+        "/stylecollect": lambda arg: _cmd_stylecollect(sess, store, arg),
         "/skill": lambda arg: _cmd_skill(sess, arg),
         "/answer": lambda arg: _cmd_answer(sess, arg),
         "/help": lambda arg: print(_HELP),
