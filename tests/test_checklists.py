@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -360,3 +361,267 @@ def test_stage_checklist_block_unknown_stage_is_empty(tmp_path):
     assert stage_checklist_block(tmp_path, "没有这个阶段",
                                  user_dir=tmp_path / "没有这个用户") == ""
 
+
+
+# ------------------------------------------------------------------ P34：编辑入口（C1）
+
+def _home(tmp_path, monkeypatch) -> Path:
+    """把用户级 home 指到 tmp（Path.home() 调用期求值，env 生效）。"""
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
+
+
+def _repl_store(tmp_path):
+    from harness.projects import create_project
+    from harness.store.project import ProjectStore
+
+    info = create_project(tmp_path / "lib", "清单书")
+    return ProjectStore(info.path)
+
+
+# ------------------------------------------------------------------ validate_checklist_title
+
+@pytest.mark.parametrize("bad", [
+    "", "   ", "a/b", "a" + chr(92) + "b", "..", "a..b", "x<y", "x>y", 'a"b', "a|b", "a?b", "a*b", "a:b",
+])
+def test_validate_title_rejects_bad(bad):
+    """非法标题（空/路径分隔/.. / Windows 非法字符）→ ValueError。"""
+    from harness.checklists import validate_checklist_title
+
+    with pytest.raises(ValueError):
+        validate_checklist_title(bad)
+
+
+def test_validate_title_strips_and_keeps():
+    """strip 后返回；常规中文标题（含 - ）照常通过。"""
+    from harness.checklists import validate_checklist_title
+
+    assert validate_checklist_title("  我的清单  ") == "我的清单"
+    assert validate_checklist_title("情节检查-每卷清单") == "情节检查-每卷清单"
+
+
+# ------------------------------------------------------------------ list_checklist_stages
+
+def test_list_stages_builtin_always_present_sorted(tmp_path, monkeypatch):
+    """无用户/项目清单时 = 内置两 stage，排序。"""
+    from harness.checklists import list_checklist_stages
+
+    _home(tmp_path, monkeypatch)
+    assert list_checklist_stages(tmp_path / "proj") == ["finish", "outline"]
+
+
+def test_list_stages_union_with_user_and_project_dirs(tmp_path, monkeypatch):
+    """用户级/项目级 stage 目录并进并集（排序）。"""
+    from harness.checklists import list_checklist_stages
+
+    home = _home(tmp_path, monkeypatch)
+    _write(home / ".harness" / "checklists" / "chapters", "条目", "提示")
+    proj = tmp_path / "proj"
+    _write(proj / ".harness" / "checklists" / "world", "条目", "提示")
+    assert list_checklist_stages(proj) == ["chapters", "finish", "outline", "world"]
+
+
+# ------------------------------------------------------------------ checklist_overview
+
+def test_overview_builtin_only_marks_source(tmp_path, monkeypatch):
+    """纯内置：source 全 builtin，且 title/hint 与 load_checklists 逐项相等。"""
+    from harness.checklists import checklist_overview, load_checklists
+
+    _home(tmp_path, monkeypatch)
+    overview = checklist_overview(tmp_path / "proj")
+    assert set(overview) == {"outline", "finish"}
+    assert all(it["source"] == "builtin"
+               for items in overview.values() for it in items)
+    for stage in ("outline", "finish"):
+        assert [(i["title"], i["hint"]) for i in overview[stage]]             == load_checklists(stage)
+
+
+def test_overview_override_chain_marks_source_and_keeps_position(tmp_path, monkeypatch):
+    """用户级覆盖内置 → source=user 位置不变；项目级覆盖/新增 → source=project。"""
+    from harness.checklists import checklist_overview
+
+    home = _home(tmp_path, monkeypatch)
+    _write(home / ".harness" / "checklists" / "outline", "情节检查-每卷清单", "用户改写")
+    proj = tmp_path / "proj"
+    _write(proj / ".harness" / "checklists" / "outline", "爽点密度-阶段标准", "项目改写")
+    _write(proj / ".harness" / "checklists" / "outline", "项目新增", "新提示")
+
+    overview = checklist_overview(proj)["outline"]
+    assert [(i["title"], i["hint"], i["source"]) for i in overview] == [
+        ("情节检查-每卷清单", "用户改写", "user"),
+        ("爽点密度-阶段标准", "项目改写", "project"),
+        ("项目新增", "新提示", "project"),
+    ]
+
+
+# ------------------------------------------------------------------ ensure_editable_item
+
+def test_ensure_editable_creates_empty_project_file(tmp_path, monkeypatch):
+    """全新条目 → 建空项目级文件，返回项目级路径。"""
+    from harness.checklists import ensure_editable_item
+
+    _home(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    path = ensure_editable_item(proj, "outline", "全新条目")
+    assert path == proj / ".harness" / "checklists" / "outline" / "全新条目.md"
+    assert path.is_file() and path.read_text(encoding="utf-8").strip() == ""
+
+
+def test_ensure_editable_copies_user_content_to_project_override(tmp_path, monkeypatch):
+    """用户级存在的条目 → 项目级覆盖**保全内容**（复制用户内容）。"""
+    from harness.checklists import ensure_editable_item
+
+    home = _home(tmp_path, monkeypatch)
+    _write(home / ".harness" / "checklists" / "outline", "我的清单", "用户内容")
+    proj = tmp_path / "proj"
+    path = ensure_editable_item(proj, "outline", "我的清单")
+    assert path.read_text(encoding="utf-8").strip() == "用户内容"
+
+
+def test_ensure_editable_copies_builtin_content(tmp_path, monkeypatch):
+    """内置条目 → 复制内置内容成项目级覆盖（编辑不丢原内容）。"""
+    from harness.checklists import DEFAULT_CHECKLISTS, ensure_editable_item
+
+    _home(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    path = ensure_editable_item(proj, "outline", "情节检查-每卷清单")
+    assert path.read_text(encoding="utf-8").strip() == DEFAULT_CHECKLISTS["outline"][0][1]
+
+
+def test_ensure_editable_existing_project_file_untouched(tmp_path, monkeypatch):
+    """项目级已存在 → 原样返回，内容不动（幂等）。"""
+    from harness.checklists import ensure_editable_item
+
+    _home(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    _write(proj / ".harness" / "checklists" / "outline", "我的清单", "项目内容")
+    path = ensure_editable_item(proj, "outline", "我的清单")
+    assert path.read_text(encoding="utf-8").strip() == "项目内容"
+
+
+# ------------------------------------------------------------------ save / delete
+
+def test_save_and_delete_project_item_roundtrip(tmp_path, monkeypatch):
+    """save（项目级）→ overview 可见（source=project，保位在末尾）→ delete 真删。"""
+    from harness.checklists import checklist_overview, delete_checklist_item, save_checklist_item
+
+    _home(tmp_path, monkeypatch)
+    proj = tmp_path / "proj"
+    save_checklist_item(proj, "finish", "完本自查", "逐项核对\n")
+    overview = checklist_overview(proj)["finish"]
+    assert overview[-1] == {"title": "完本自查", "hint": "逐项核对",
+                            "source": "project"}
+    assert delete_checklist_item(proj, "finish", "完本自查") is True
+    assert all(i["title"] != "完本自查"
+               for i in checklist_overview(proj)["finish"])
+
+
+def test_delete_non_project_item_is_noop(tmp_path, monkeypatch):
+    """非项目级条目（用户级/内置）→ False，文件层零变化。"""
+    from harness.checklists import delete_checklist_item
+
+    home = _home(tmp_path, monkeypatch)
+    user_file = _write(home / ".harness" / "checklists" / "outline", "用户条目", "x")
+    proj = tmp_path / "proj"
+    assert delete_checklist_item(proj, "outline", "用户条目") is False
+    assert user_file.is_file()
+    assert delete_checklist_item(proj, "outline", "情节检查-每卷清单") is False  # 内置
+
+
+# ------------------------------------------------------------------ REPL /checklist
+
+def test_repl_checklist_lists_sources_and_stage_labels(tmp_path, monkeypatch, capsys):
+    """无参：stage 标注 生效中/未接入；条目标来源；预览截 100 字。"""
+    from harness.repl import _cmd_checklist
+
+    home = _home(tmp_path, monkeypatch)
+    _write(home / ".harness" / "checklists" / "outline", "情节检查-每卷清单", "用户改写提示")
+    store = _repl_store(tmp_path)
+    _write(store.root / ".harness" / "checklists" / "chapters", "章级条目", "章节提示" + "字" * 200)
+
+    _cmd_checklist(store, "")
+
+    out = capsys.readouterr().out
+    assert "outline" in out and "生效中" in out
+    assert "chapters" in out and "未接入" in out
+    assert "［用户］" in out and "［项目］" in out and "［内置］" in out
+    assert "用户改写提示" in out
+    assert "字" * 101 not in out, "预览截 100 字"
+
+
+def test_repl_checklist_edit_opens_editor_with_project_path(tmp_path, monkeypatch, capsys):
+    """edit 新条目：建空项目级文件 + 编辑器收到的就是项目级路径。"""
+    from harness import repl
+
+    _home(tmp_path, monkeypatch)
+    store = _repl_store(tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr(repl, "_open_in_editor", lambda p: opened.append(str(p)))
+
+    repl._cmd_checklist(store, "edit outline 全新条目")
+
+    expected = store.root / ".harness" / "checklists" / "outline" / "全新条目.md"
+    assert opened == [str(expected)]
+    assert expected.is_file()
+
+
+def test_repl_checklist_edit_copies_user_content(tmp_path, monkeypatch):
+    """edit 用户级条目：override 保全内容（项目级文件=用户内容）。"""
+    from harness import repl
+
+    home = _home(tmp_path, monkeypatch)
+    _write(home / ".harness" / "checklists" / "outline", "我的清单", "用户内容")
+    store = _repl_store(tmp_path)
+    monkeypatch.setattr(repl, "_open_in_editor", lambda p: None)
+
+    repl._cmd_checklist(store, "edit outline 我的清单")
+
+    path = store.root / ".harness" / "checklists" / "outline" / "我的清单.md"
+    assert path.read_text(encoding="utf-8").strip() == "用户内容"
+
+
+def test_repl_checklist_add_alias_of_edit(tmp_path, monkeypatch):
+    """add 与 edit 同语义：建文件 + 开编辑器。"""
+    from harness import repl
+
+    _home(tmp_path, monkeypatch)
+    store = _repl_store(tmp_path)
+    opened: list[str] = []
+    monkeypatch.setattr(repl, "_open_in_editor", lambda p: opened.append(str(p)))
+
+    repl._cmd_checklist(store, "add finish 完本自查")
+
+    assert opened and opened[0].endswith("checklists" + os.sep + "finish" + os.sep + "完本自查.md")
+
+
+def test_repl_checklist_delete_project_item(tmp_path, monkeypatch, capsys):
+    """delete 项目级条目：真删 + 说明；非项目级：如实说明不删。"""
+    from harness import repl
+
+    _home(tmp_path, monkeypatch)
+    store = _repl_store(tmp_path)
+    proj_file = _write(store.root / ".harness" / "checklists" / "outline", "项目条目", "x")
+
+    repl._cmd_checklist(store, "delete outline 项目条目")
+    assert not proj_file.is_file()
+    assert "已删除" in capsys.readouterr().out
+
+    repl._cmd_checklist(store, "delete outline 情节检查-每卷清单")
+    assert "非项目级" in capsys.readouterr().out
+
+
+def test_repl_checklist_open_editor_without_editor_env(tmp_path, monkeypatch, capsys):
+    """EDITOR 未设：打印路径，不炸。"""
+    from harness.repl import _open_in_editor
+
+    monkeypatch.delenv("EDITOR", raising=False)
+    _open_in_editor(Path("/tmp/某清单.md"))
+    assert "某清单.md" in capsys.readouterr().out
+
+
+def test_repl_help_lists_checklist():
+    from harness.repl import _HELP
+
+    assert "/checklist" in _HELP

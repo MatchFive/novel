@@ -10,6 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import shlex
+import subprocess
 import sys
 import threading
 import time
@@ -74,6 +77,8 @@ _HELP = """可用命令：
   /audit [all|<seq>|<from>-<to>]  一致性审计（默认确定性全量 + LLM 复核最近 12 章）
   /check [plot|global] [editor]  验收（默认全书级；plot=情节级；editor=签约责编视角；只报不改）
   /skills      两级 skill 清单（项目级 + 用户级，项目级覆盖同名）
+  /checklist [edit|add|delete <stage> <标题>]  验收清单：列出（带来源标注）/
+               编辑器改条目（edit/add 保全原内容建项目级覆盖；delete 只删项目级）
   /skill import <路径> [--project]  导入外部 skill（单文件或整目录；默认用户级）
   /answer      非 TTY 审批应答：/answer 1 2 备注:...（写 .harness/pending.answer，
                首行自动带本轮轮次——迟到的回答不进下一轮）
@@ -228,6 +233,72 @@ def _cmd_memory(store: ProjectStore) -> None:
         print(f"【章记忆】共 {len(seqs)} 章：{rng}")
     else:
         print("【章记忆】（无）")
+
+
+def _open_in_editor(path: Path) -> None:
+    """用 ``$EDITOR`` 打开清单文件；未设 → 打印路径让用户手动开（不炸）。"""
+    editor = os.environ.get("EDITOR", "").strip()
+    if editor:
+        subprocess.call([*shlex.split(editor), str(path)])
+    else:
+        print(f"EDITOR 未设置，请手动编辑：{path}")
+
+
+def _cmd_checklist(store: ProjectStore, arg: str) -> None:
+    """验收清单的查看/编辑入口（P34，C1）：清单是文件（文件名=标题，正文=提示），
+    门槛在「得知道文件在哪、命名规则」——本命令替用户解析生效文件并直接调起编辑器。
+
+    - 无参：按 stage 列出生效条目（标注 生效中/未接入 与来源 内置/用户/项目）。
+    - ``edit|add <stage> <标题>``：ensure 项目级文件（override 保全内容）→ 开编辑器。
+    - ``delete <stage> <标题>``：只删项目级条目；内置/用户级如实说明不删。
+    """
+    from harness.checklists import (
+        ACTIVE_STAGES,
+        checklist_overview,
+        delete_checklist_item,
+        ensure_editable_item,
+    )
+
+    arg = (arg or "").strip()
+    if not arg:
+        overview = checklist_overview(store.root)
+        if not overview:
+            print("（无任何清单条目）")
+            return
+        badges = {"builtin": "［内置］", "user": "［用户］", "project": "［项目］"}
+        for stage in sorted(overview):
+            label = "生效中" if stage in ACTIVE_STAGES else "未接入"
+            print(f"[{stage}]（{label}）")
+            for i, item in enumerate(overview[stage], 1):
+                hint = " ".join(str(item["hint"] or "").split())[:100]
+                line = f"  {i}. {item['title']} {badges[item['source']]}"
+                if hint:
+                    line += f"\n     {hint}"
+                print(line)
+        return
+
+    sub, _, rest = arg.partition(" ")
+    stage, _, title = rest.strip().partition(" ")
+    title = title.strip()
+    if sub not in ("edit", "add", "delete") or not stage or not title:
+        print("用法：/checklist ｜ /checklist edit|add <stage> <标题> ｜ "
+              "/checklist delete <stage> <标题>")
+        return
+    if sub == "delete":
+        if delete_checklist_item(store.root, stage, title):
+            print(f"已删除项目级清单条目「{title}」（stage={stage}）")
+        else:
+            print(f"「{title}」非项目级条目（内置或用户级）：请改对应层"
+                  f"（用户级在 ~/.harness/checklists/{stage}/），"
+                  "或在项目级建同名覆盖")
+        return
+    try:
+        path = ensure_editable_item(store.root, stage, title)
+    except ValueError as exc:
+        print(f"清单标题非法：{exc}")
+        return
+    print(f"编辑：{path}")
+    _open_in_editor(path)
 
 
 # ------------------------------------------------------------------ run 会话（委托 harness.session）
@@ -820,6 +891,7 @@ def run_repl(project: ProjectInfo, store: ProjectStore, *, resume: bool = False,
         "/audit": lambda arg: _cmd_audit(sess, arg),
         "/check": lambda arg: _cmd_check(sess, arg),
         "/skills": lambda arg: _cmd_skills(sess),
+        "/checklist": lambda arg: _cmd_checklist(store, arg),
         "/skill": lambda arg: _cmd_skill(sess, arg),
         "/answer": lambda arg: _cmd_answer(sess, arg),
         "/help": lambda arg: print(_HELP),

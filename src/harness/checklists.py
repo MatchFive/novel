@@ -28,16 +28,23 @@ import unicodedata
 from pathlib import Path
 
 __all__ = [
+    "ACTIVE_STAGES",
     "BLOCK_MAX_CHARS",
     "DEFAULT_CHECKLISTS",
     "HINT_MAX_CHARS",
     "canonical_title",
     "checklist_dir",
+    "checklist_overview",
+    "delete_checklist_item",
+    "ensure_editable_item",
+    "list_checklist_stages",
     "load_checklists",
     "render_checklist_items",
     "render_stage_checklist_block",
+    "save_checklist_item",
     "stage_checklist_block",
     "user_checklist_dir",
+    "validate_checklist_title",
 ]
 
 log = logging.getLogger("checklists")
@@ -227,3 +234,110 @@ def canonical_title(name: str, titles: list[str]) -> str | None:
             return title
     candidates = [t for t in (titles or []) if _prefix_related(_norm_title(t), target)]
     return candidates[0] if len(candidates) == 1 else None
+
+
+# ------------------------------------------------------------------ 编辑入口（P34 / C1）
+
+#: 现行消费 stage：生成侧（``tools/outline.py`` / ``tools/plots.py`` 的 stage_checklist_block）
+#: + 验收侧（``check/context.py`` 的 load_checklists）。其余 stage 目录在 /checklist
+#: 列表里标「未接入」——建了得自己找消费方。
+ACTIVE_STAGES = ("outline", "finish")
+
+#: Windows 文件名非法字符（除路径分隔 / \\ 与 .. 外）
+_BAD_TITLE_CHARS = ('<', '>', ':', '"', '|', '?', '*')
+
+
+def validate_checklist_title(title: str) -> str:
+    """清单条目标题校验（fail loud）：strip → 非空、不含 ``/`` ``\\\\`` ``..`` 与
+    Windows 非法字符 ``<>:"|?*``；合法返回 strip 后标题。
+
+    标题即文件名（``<标题>.md``）——非法标题会在写盘时才炸 OSError，提前在入口拦住。
+    """
+    cleaned = str(title or "").strip()
+    if not cleaned:
+        raise ValueError("清单标题不能为空")
+    if "/" in cleaned or "\\" in cleaned or ".." in cleaned:
+        raise ValueError(f"清单标题含路径字符（/ \\ ..）：{cleaned!r}")
+    bad = [c for c in _BAD_TITLE_CHARS if c in cleaned]
+    if bad:
+        raise ValueError(f"清单标题含 Windows 非法字符 {''.join(bad)!r}：{cleaned!r}")
+    return cleaned
+
+
+def _discover_stages(base: Path) -> list[str]:
+    """``<base>/.harness/checklists/`` 下的 stage 子目录名（不存在 → []）。"""
+    root = Path(base) / ".harness" / "checklists"
+    if not root.is_dir():
+        return []
+    return sorted(p.name for p in root.iterdir() if p.is_dir())
+
+
+def list_checklist_stages(project_root: Path | None) -> list[str]:
+    """stage 并集：内置键 ∪ 用户级目录名 ∪ 项目级目录名（排序）。
+
+    home 走 :func:`Path.home` 调用期求值（同 user_checklist_dir 惯例）。
+    """
+    stages = set(DEFAULT_CHECKLISTS)
+    stages.update(_discover_stages(Path.home()))
+    if project_root is not None:
+        stages.update(_discover_stages(Path(project_root)))
+    return sorted(stages)
+
+
+def checklist_overview(project_root: Path | None) -> dict[str, list[dict]]:
+    """每 stage 的**生效**条目（title/hint/source 三键 dict），覆盖链**保位**。
+
+    与 :func:`load_checklists` 同一合并语义（内置 → 用户级 → 项目级，同名后者赢且
+    不重排），只多标注来源（builtin/user/project）——/checklist 列表的数据源。
+    """
+    merged: dict[str, dict[str, dict]] = {}
+    for stage in list_checklist_stages(project_root):
+        items: dict[str, dict] = {}
+        for title, hint in DEFAULT_CHECKLISTS.get(stage, ()):
+            items[title] = {"title": title, "hint": hint, "source": "builtin"}
+        for title, hint in _read_dir(user_checklist_dir(stage)):
+            items[title] = {"title": title, "hint": hint, "source": "user"}
+        if project_root is not None:
+            for title, hint in _read_dir(checklist_dir(Path(project_root), stage)):
+                items[title] = {"title": title, "hint": hint, "source": "project"}
+        merged[stage] = items
+    return {stage: list(items.values()) for stage, items in merged.items()}
+
+
+def checklist_item_path(project_root: Path, stage: str, title: str) -> Path:
+    """项目级清单文件路径（不落盘）；标题先过 :func:`validate_checklist_title`。"""
+    return checklist_dir(Path(project_root), stage) / f"{validate_checklist_title(title)}.md"
+
+
+def ensure_editable_item(project_root: Path, stage: str, title: str) -> Path:
+    """确保条目有**项目级文件**可编辑（override 保全内容）。
+
+    项目级已存在 → 原样返回（幂等）；否则把**生效内容**（用户级 > 内置）复制成项目级
+    新文件——编辑内置/用户级条目不会丢原内容；都无 → 建空文件。返回项目级路径。
+    """
+    path = checklist_item_path(project_root, stage, title)
+    if path.is_file():
+        return path
+    hint = dict(load_checklists(stage, project_root=Path(project_root))).get(
+        validate_checklist_title(title), "")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text((hint.strip() + "\n") if hint.strip() else "",
+                    encoding="utf-8", newline="\n")
+    return path
+
+
+def save_checklist_item(project_root: Path, stage: str, title: str, hint: str) -> Path:
+    """整写项目级清单文件（正文 = 判定提示，strip + 末尾换行）；返回路径。"""
+    path = checklist_item_path(project_root, stage, title)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(hint or "").strip() + "\n", encoding="utf-8", newline="\n")
+    return path
+
+
+def delete_checklist_item(project_root: Path, stage: str, title: str) -> bool:
+    """删**项目级**清单文件；非项目级（内置/用户级）或不存在 → False（不碰别的层）。"""
+    path = checklist_item_path(project_root, stage, title)
+    if not path.is_file():
+        return False
+    path.unlink()
+    return True
