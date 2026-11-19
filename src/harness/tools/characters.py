@@ -11,10 +11,12 @@
   已过确认门的既有卡，违背 D2「人确认落卡」更基本；降级信息无损，观测如实说明。
 - 确认门 = ask_ui_async 多选（edit_by_command 同款，web 端 pending.md 通用渲染）；
   取消 → 零落卡，卡 JSON 原样附观测（一张不丢）。
-- 关系网 / auto review-revise 闭环不在本期（D2：本地无关系对象；人确认代替裁定）。
+- ~~关系网~~ → **P33 已落地**（build 落卡后全名册生成 → 第二道确认门 → relations.md；
+  delete/rename 级联）。auto review-revise 闭环不在本期（D2：人确认代替裁定）。
 
 **P23 本地兑现口径**（与附录 A.3 的差异，见 brief）：
-- delete 连带「关系」本地无对象（关系网未落地）；记忆侧经 ``reextract_cast``
+- delete 连带「关系」——**P33 已落地**（relations.md 级联清理/改写；此前本地无关系
+  对象时的挂账勾销）；记忆侧经 ``reextract_cast``
   逐章幂等重提；**名册身份变化**（改名/删除/进出 protagonist）才触发，别名/profile
   微调不重提（成本）。
 - ``all=true`` 的确认门 = 同传 ``confirm: true`` 参数门（本地工具层无交互确认
@@ -40,6 +42,7 @@ from harness.characters import (
     CharacterDraftError,
     add_protagonist,
     draft_character_card,
+    generate_relationship_graph,
     plan_cast,
     remove_protagonist,
     save_character_card,
@@ -49,6 +52,7 @@ from harness.llm.client import OpenAICompatClient
 from harness.prompts.loader import PromptLoader
 from harness.run.approval import ApprovalCancelled, ApprovalUI, ask_ui_async
 from harness.run.events import EventLog
+from harness.store.frontmatter import FileFormatError
 from harness.store.project import ProjectStore
 from harness.text import as_text
 from harness.tools.base import ToolResult, _run_sync
@@ -132,6 +136,7 @@ async def _delete_cards(store: ProjectStore, llm, prompts, settings, names: list
     """
     deleted: list[str] = []
     skipped: list[str] = []
+    rel_removed = 0
     for name in names:
         try:
             meta = store.read_character(name)
@@ -142,10 +147,16 @@ async def _delete_cards(store: ProjectStore, llm, prompts, settings, names: list
         deleted.append(name)
         if str(meta.get("role_type") or "") == "protagonist":
             remove_protagonist(store.root, name)
+        try:
+            rel_removed += store.remove_relations_for(name)
+        except FileFormatError:
+            pass   # 坏 relations.md 不阻断删卡（split_file 已备份+告警）
 
     parts: list[str] = []
     if deleted:
         parts.append(f"已删除 {len(deleted)} 张角色卡（{'、'.join(deleted)}）")
+    if rel_removed:
+        parts.append(f"关系网清理 {rel_removed} 条")
     if skipped:
         parts.append(f"跳过 {len(skipped)} 张（不存在：{'、'.join(skipped)}）")
     if not deleted:
@@ -243,8 +254,16 @@ async def update_character(store: ProjectStore, llm, prompts, settings,
                         or (old_role == "protagonist") != (new_role == "protagonist"))
     note = await _refresh_cast_memory(store=store, llm=llm, prompts=prompts,
                                       settings=settings) if identity_changed else ""
+    rel_note = ""
+    if renamed:
+        try:
+            rel_changed = store.rename_relations(name, new_name)
+        except FileFormatError:
+            rel_changed = 0   # 坏 relations.md 如实跳过（split_file 已备份+告警）
+        if rel_changed:
+            rel_note = f"（关系网改写 {rel_changed} 条）"
     return ToolResult(text=f"update_character 完成：已更新角色卡「{target}」"
-                           f"（改动：{'、'.join(changes)}）{note}", usage=None)
+                           f"（改动：{'、'.join(changes)}）{note}{rel_note}", usage=None)
 
 
 async def delete_character(store: ProjectStore, llm, prompts, settings,
@@ -269,6 +288,51 @@ async def delete_character(store: ProjectStore, llm, prompts, settings,
                           usage=None)
     return await _delete_cards(store, llm, prompts, settings, names,
                                action="delete_character")
+
+
+# ------------------------------------------------------------------ P33：关系网（build 内接线）
+
+async def _relationship_graph_step(store: ProjectStore, llm: OpenAICompatClient,
+                                   prompts: PromptLoader, settings, ui,
+                                   ) -> tuple[str, str]:
+    """落卡后的关系网生成 + 第二道确认门（P33，D2：生成内容过人确认才写盘）。
+
+    返回 (首行注记, 取消时附观测的关系 JSON)。失败**不拖垮 build**（卡已落）：
+    分类串进注记；<2 张卡跳过（零 LLM）；取消 = 关系零写盘、JSON 原样附观测。
+    """
+    try:
+        relations, _usage, dropped = await generate_relationship_graph(
+            store=store, llm=llm, prompts=prompts, settings=settings)
+    except ValueError:
+        return "关系网跳过（不足 2 位角色）", ""
+    except CharacterDraftError as exc:
+        return f"关系网生成失败（{exc.reason}）", ""
+    except Exception:  # noqa: BLE001 - 非 LLMError 异常兜底（卡已落，不拖垮 build）
+        return "关系网生成失败（api:error）", ""
+    if not relations:
+        note = "关系网无产出"
+        return note + (f"（未命中跳过 {dropped}）" if dropped else ""), ""
+
+    options = [f"{r['from']} × {r['to']}：{r['relation']}"
+               + (f"——{r['description']}" if r["description"] else "") for r in relations]
+    try:
+        existing = store.read_relations()
+    except FileFormatError:
+        existing = []   # 坏 relations.md 不阻断（split_file 已备份+告警）
+    question = (f"关系网共 {len(relations)} 条（将重写 relations.md"
+                + (f"，现有 {len(existing)} 条" if existing else "")
+                + "；空格分隔可多选；取消 = 不写入）：\n" + "\n".join(options))
+    try:
+        choice = await ask_ui_async(ui, question, options, multi=True)
+    except ApprovalCancelled:
+        return ("关系网未写入（已取消）",
+                json.dumps(relations, ensure_ascii=False))
+    picked = [relations[i] for i in choice.indices if 0 <= i < len(relations)]
+    store.write_relations(picked)
+    note = f"关系网 {len(picked)} 条（写入 relations.md"
+    if dropped:
+        note += f"；未命中跳过 {dropped}"
+    return note + "）", ""
 
 
 # ------------------------------------------------------------------ P24：自动建卡司
@@ -376,14 +440,20 @@ async def build_characters(store: ProjectStore, llm: OpenAICompatClient,
     parts.append(f"撞名跳过 {len(dupes)}" + (f"（{'、'.join(dupes)}）" if dupes else ""))
     parts.append(f"主角降级 {len(demoted)}" + (f"（{'、'.join(demoted)}）" if demoted else ""))
     note = ""
+    rel_payload = ""
     if approved:
         events = EventLog(store.root)
         for card in approved:
             save_character_card(store, events, card)
         note = await _refresh_cast_memory(store=store, llm=llm, prompts=prompts,
                                           settings=settings)
-    return ToolResult(text="build_characters 完成：" + "；".join(parts) + note,
-                      usage=usage)
+        rel_note, rel_payload = await _relationship_graph_step(store, llm, prompts,
+                                                               settings, ui)
+        parts.append(rel_note)
+    text = "build_characters 完成：" + "；".join(parts) + note
+    if rel_payload:
+        text += "\n" + rel_payload
+    return ToolResult(text=text, usage=usage)
 
 
 def register_character_tools(reg: ToolRegistry, *, store: ProjectStore,

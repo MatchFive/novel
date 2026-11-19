@@ -21,6 +21,7 @@ pathlib 读项目文件；唯一的 LLM 缝是 :func:`draft_character_card`（�
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,7 +49,9 @@ __all__ = [
     "carded_names",
     "collect_candidates",
     "draft_character_card",
+    "generate_relationship_graph",
     "load_collective_names",
+    "normalize_relations",
     "plan_cast",
     "reextract_cast",
     "remove_protagonist",
@@ -485,6 +488,89 @@ async def plan_cast(*, store: ProjectStore, llm: OpenAICompatClient,
         seen.add(entry["name"])
         roster.append(entry)
     return roster, usage
+
+
+# ================================================================ 关系网（P33）
+
+def normalize_relations(raw: object, resolve: dict[str, str]) -> tuple[list[dict], int]:
+    """关系项规整（纯函数）：from/to 经 ``resolve`` 解析成规范卡名（name + alias → canonical）。
+
+    丢弃并计数：非 dict 项 / 任一端未命中 / 解析后自配对 / relation 空白 / (from,to,
+    relation) 精确三元重复。输出 dict 四键全 str（description 缺省 ""），保序。
+    """
+    items = raw if isinstance(raw, list) else []
+    out: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    dropped = 0
+    for item in items:
+        if not isinstance(item, dict):
+            dropped += 1
+            continue
+        from_name = resolve.get(str(item.get("from") or "").strip())
+        to_name = resolve.get(str(item.get("to") or "").strip())
+        relation = str(item.get("relation") or "").strip()
+        if not from_name or not to_name or from_name == to_name or not relation:
+            dropped += 1
+            continue
+        key = (from_name, to_name, relation)
+        if key in seen:
+            dropped += 1
+            continue
+        seen.add(key)
+        out.append({"from": from_name, "to": to_name, "relation": relation,
+                    "description": str(item.get("description") or "").strip()})
+    return out, dropped
+
+
+def _relations_extract(text: str):
+    """extract：首个 dict 的 relations 数组（缺数组/空数组 → None 走重试阶梯）。"""
+    value = extract_json(text)
+    relations = value.get("relations") if isinstance(value, dict) else None
+    if not isinstance(relations, list) or not relations:
+        return None
+    return relations
+
+
+async def generate_relationship_graph(*, store: ProjectStore, llm: OpenAICompatClient,
+                                      prompts: PromptLoader, settings,
+                                      ) -> tuple[list[dict], object | None, int]:
+    """渲染 task.character_relations → complete_structured → :func:`normalize_relations`。
+
+    - ``settings`` 预留（路由钉死 standard/0.6/4096，seed router character_relations →
+      STANDARD/0.6；同 plan_cast「模板首行头」惯例，WRITING_ROUTING 不加键）。
+    - 名册 = ``cast_roster``（全卡 profile）+ ``list_characters``（aliases）；
+      **全名册 <2 张卡 → ValueError**（seed 400「至少需要 2 个角色才能生成关系网」
+      口径），零 LLM。调用方归「跳过/失败（参数）」观测。
+    - 结构化失败 → :class:`CharacterDraftError`（同起草分类串词表）；非 LLMError 异常
+      原样上抛（complete_structured 纪律），由调用方兜底归观测。
+    - 返回 (relations, usage, dropped)：端点已解析成规范卡名；dropped = 丢弃计数。
+    """
+    del settings   # 路由钉死（模板首行头）；参数保留为调用契约的一部分
+    from harness.memory.extract import cast_roster  # 惰性：顶层 import 成环（同 reextract_cast）
+
+    roster = cast_roster(store)
+    resolve: dict[str, str] = {}
+    for card in store.list_characters():
+        canonical = str(card.get("name") or "")
+        if not canonical:
+            continue
+        resolve.setdefault(canonical, canonical)
+        for alias in card.get("aliases") or []:
+            resolve.setdefault(str(alias), canonical)
+    if len(set(resolve.values())) < 2:
+        raise ValueError("至少需要 2 个角色才能生成关系网")
+    cast_cards = "\n".join(
+        f"【{card['name']}】({card.get('role_type') or '角色'}) "
+        f"{json.dumps(card.get('profile') or {}, ensure_ascii=False)}"
+        for card in roster)
+    prompt = prompts.render("task.character_relations", cast_cards=cast_cards)
+    data, usage, reason = await complete_structured(
+        llm, model=llm.provider.standard, temperature=0.6, max_tokens=4096,
+        prompt=prompt, extract=_relations_extract)
+    if not isinstance(data, list):
+        raise CharacterDraftError(reason or "empty", usage=usage)
+    relations, dropped = normalize_relations(data, resolve)
+    return relations, usage, dropped
 
 
 # ================================================================ 落卡（Task 18）

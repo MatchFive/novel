@@ -354,6 +354,79 @@ class ProjectStore:
                           "aliases": aliases})
         return cards
 
+    # ------------------------------------------------------------ 关系网（P33）
+
+    def relations_path(self) -> Path:
+        return self.root / "relations.md"
+
+    def read_relations(self) -> list[dict]:
+        """relations.md 的规范关系条目；缺文件 → []（不抛）。
+
+        坏 front-matter → FileFormatError（同 read_character 口径，备份+报错由 split_file 保证）。
+        """
+        path = self.relations_path()
+        if not path.is_file():
+            return []
+        meta, _ = split_file(path)
+        relations = meta.get("relations") if isinstance(meta, dict) else None
+        if not isinstance(relations, list):
+            return []
+        out: list[dict] = []
+        for item in relations:
+            if not isinstance(item, dict):
+                continue
+            from_name = str(item.get("from") or "").strip()
+            to_name = str(item.get("to") or "").strip()
+            relation = str(item.get("relation") or "").strip()
+            if not from_name or not to_name or not relation:
+                continue
+            out.append({"from": from_name, "to": to_name, "relation": relation,
+                        "description": str(item.get("description") or "").strip()})
+        return out
+
+    def write_relations(self, relations: list[dict]) -> Path:
+        """整写 relations.md：front-matter 存规范结构（YAML 兜任意字符），正文渲染人类可读行。"""
+        path = self.relations_path()
+        lines = ["# 关系网", "",
+                 "<!-- 由 build_characters 自动生成（P33）；可手改；删角色卡时自动清理相关条目。 -->",
+                 ""]
+        for rel in relations:
+            desc = str(rel.get("description") or "").strip()
+            tail = f"——{desc}" if desc else ""
+            lines.append(f"- {rel['from']} × {rel['to']}：{rel['relation']}{tail}")
+        with self._hold(path):
+            self._write(path, render_document({"relations": relations}, "\n".join(lines)))
+        return path
+
+    def remove_relations_for(self, name: str) -> int:
+        """删掉端点 == ``name`` 的关系条目（删卡级联）；返回条数，零变更不重写。"""
+        name = str(name or "").strip()
+        relations = self.read_relations()
+        keep = [r for r in relations if r["from"] != name and r["to"] != name]
+        removed = len(relations) - len(keep)
+        if removed:
+            self.write_relations(keep)
+        return removed
+
+    def rename_relations(self, old: str, new: str) -> int:
+        """关系端点 ``old`` → ``new``（改卡名级联）；返回改写条数，零变更不重写。"""
+        old = str(old or "").strip()
+        new = str(new or "").strip()
+        if not old or not new or old == new:
+            return 0
+        relations = self.read_relations()
+        changed = 0
+        for rel in relations:
+            if rel["from"] == old:
+                rel["from"] = new
+                changed += 1
+            if rel["to"] == old:
+                rel["to"] = new
+                changed += 1
+        if changed:
+            self.write_relations(relations)
+        return changed
+
     # ------------------------------------------------------------ 卷骨架+情节
 
     def _read_arcs_meta(self) -> dict:

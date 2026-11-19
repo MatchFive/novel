@@ -213,21 +213,24 @@ async def test_build_partial_approval(tmp_path):
 
 
 async def test_build_skips_name_and_alias_dupes(tmp_path):
-    """撞名（含别名）去重：计数进首行、零起草调用。"""
+    """撞名（含别名）去重：计数进首行、零起草调用。（P33 起批准后还有 1 次关系网调用。）"""
     store = _store(tmp_path)
     _seed_card(store, name="甲", aliases=["阿甲"])
     llm = FakeLLM([_Resp(_roster([
         {"name": "甲", "role_type": "major"},
         {"name": "阿甲", "role_type": "daily"},
         {"name": "乙", "role_type": "major"},
-    ])), _Resp(_card_json("乙"))])
+    ])), _Resp(_card_json("乙")),
+        _Resp(json.dumps({"relations": [{"from": "甲", "to": "乙",
+                                         "relation": "盟友", "description": "d"}]},
+                         ensure_ascii=False))])
 
     res = await build_characters(store, llm, _prompts(store), None,
                                  FakeUI(indices=[0]), {})
 
     first = res.text.splitlines()[0]
     assert "撞名跳过 2" in first and "甲" in first and "阿甲" in first
-    assert len(llm.calls) == 2, "规划 1 + 起草 1（两张撞名未起草）"
+    assert len(llm.calls) == 3, "规划 1 + 起草 1（两张撞名未起草）+ 关系网 1（P33）"
     assert "乙" in {c["name"] for c in store.list_characters()}
 
 
