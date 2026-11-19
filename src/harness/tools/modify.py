@@ -42,6 +42,9 @@ _DIFF_MAX_LINES = 60  # 单个文件 diff 预览上限，超出截断注记（�
 
 _VOL_PLOT = re.compile(r"^vol-(\d+)\.md$")
 _PLOT_REF = re.compile(r"^(\d+)-(\d+)$")
+# skill 目录名（P36，C2「skill 的 LLM 自动创建」）：与 slugify 同字符类——无 /、无 ..、
+# 无盘符可越界；落点名只信 path 段，front-matter 的 name: 只是 metadata 不参与路径
+_SKILL_NAME = re.compile(r"^[\w一-鿿-]+$")
 # 章记忆文件头（「# 第N章记忆《title》」）：按标题定位记忆实际章号（transit 自愈用）
 _MEM_HEAD = re.compile(r"^# 第\d+章记忆《(.*?)》")
 
@@ -78,9 +81,18 @@ def _classify_path(raw: str) -> tuple[str | None, str | None, int | None]:
         m = _VOL_PLOT.match(parts[2])
         if m:
             return "plots", rel, int(m.group(1))
+    # P36：项目级 skill 的 LLM 自动创建/改写走既有轻量修改路径（设计 §2.6）——
+    # 复用 edit_by_command 确认门，不新增并发写入口
+    if len(parts) == 4 and parts[0] == ".harness" and parts[1] == "skills":
+        if parts[3] == "SKILL.md" and _SKILL_NAME.match(parts[2]):
+            return "skill", rel, None
+        return None, ("skill 名非法（仅字母/数字/CJK/下划线/连字符）"
+                      if parts[3] == "SKILL.md"
+                      else "skill 路径必须是 .harness/skills/<name>/SKILL.md"), None
     if parts[0] == "chapters":
         return None, "章节正文不支持经本工具修改（P3 支持）", None
-    return None, "不在可修改范围（仅 world.md / characters/*.md / outline/arcs.md / outline/plots/vol-*.md）", None
+    return None, ("不在可修改范围（仅 world.md / characters/*.md / outline/arcs.md / "
+                  "outline/plots/vol-*.md / .harness/skills/<name>/SKILL.md）"), None
 
 
 def _snapshot(store: ProjectStore) -> dict[str, str]:
@@ -104,6 +116,13 @@ def _snapshot(store: ProjectStore) -> dict[str, str]:
         for p in sorted(plots.iterdir()):
             if p.is_file() and _VOL_PLOT.match(p.name):
                 _add(f"outline/plots/{p.name}", p)
+    # P36：项目级 skill 也在【现状】里（模型可见才能扩建/改写，不覆盖乱写）
+    skills = root / ".harness" / "skills"
+    if skills.is_dir():
+        for d in sorted(skills.iterdir()):
+            f = d / "SKILL.md"
+            if d.is_dir() and f.is_file():
+                _add(f".harness/skills/{d.name}/SKILL.md", f)
     return files
 
 
@@ -163,6 +182,12 @@ def _apply(store: ProjectStore, prop: _Proposal) -> str | None:
             if not plots:
                 return "解析不到情节条目"
             store.upsert_plots(prop.vol, plots)
+        elif prop.kind == "skill":
+            # P36：SKILL.md 自由格式 md（skills.py 读取方容忍坏档=跳过），无需 front-matter 校验
+            name = prop.path.split("/")[2]
+            path = store.root / ".harness" / "skills" / name / "SKILL.md"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(prop.content, encoding="utf-8", newline="\n")
     except (yaml.YAMLError, ValueError) as exc:
         return f"front-matter 解析失败：{exc}"
     return None

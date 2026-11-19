@@ -114,6 +114,53 @@ def test_edit_by_command_applied_triggers_git_snapshot(store, make_llm, monkeypa
     assert "1 个文件" in detail and "characters/陆昭.md" in detail
 
 
+# ---------- P36（C2）：edit_by_command 范围扩到 .harness/skills/<name>/SKILL.md ----------
+
+_SKILL_DOC = ("---\nname: 打斗场面\ndescription: 打斗场面的写法\n---\n\n"
+              "# 打斗场面\n\n招式要有来有回。\n")
+
+
+def test_edit_by_command_creates_project_skill(store, make_llm):
+    """P36：skill 的 LLM 自动创建走既有轻量修改路径（设计 §2.6）——确认后直落
+    ``.harness/skills/<name>/SKILL.md``；propose 提示词也能看到既有项目 skill。"""
+    skill_dir = store.root / ".harness" / "skills" / "旧手法"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# 旧手法\n", encoding="utf-8")
+    edits = json.dumps([{"path": ".harness/skills/打斗场面/SKILL.md",
+                         "content": _SKILL_DOC}], ensure_ascii=False)
+    llm, calls = make_llm([edits])
+    ui = FakeUI(choice=Choice(indices=[0]))
+    reg = make_registry(store, llm, ui)
+    obs = reg.execute("edit_by_command", {"instruction": "新建打斗场面的 skill"},
+                      allowed=frozenset({"edit_by_command"}))
+    target = store.root / ".harness" / "skills" / "打斗场面" / "SKILL.md"
+    assert target.read_text(encoding="utf-8") == _SKILL_DOC
+    assert "已应用 1 个文件" in obs
+    # propose 提示词的【现状】含既有项目 skill（模型可见才能扩建，不覆盖乱写）
+    assert ".harness/skills/旧手法/SKILL.md" in calls[0]["messages"][-1]["content"]
+
+
+def test_edit_by_command_rejects_illegal_skill_name(store, make_llm):
+    """skill 名不合法（空格 / .. / 非 SKILL.md 段）→ 拒绝观测，零写盘。"""
+    edits = json.dumps([{"path": ".harness/skills/坏 名/SKILL.md",
+                         "content": _SKILL_DOC}], ensure_ascii=False)
+    llm, _calls = make_llm([edits])
+    ui = FakeUI(choice=Choice(indices=[0]))
+    reg = make_registry(store, llm, ui)
+    obs = reg.execute("edit_by_command", {"instruction": "新建 skill"},
+                      allowed=frozenset({"edit_by_command"}))
+    assert "skill 名非法" in obs
+    assert not (store.root / ".harness" / "skills" / "坏 名").exists()
+    assert len(ui.asked) == 0                              # 范围外拒绝在确认门之前
+    edits2 = json.dumps([{"path": ".harness/skills/abc/notes.md",
+                          "content": _SKILL_DOC}], ensure_ascii=False)
+    llm2, _ = make_llm([edits2])
+    reg2 = make_registry(store, llm2, ui)
+    obs2 = reg2.execute("edit_by_command", {"instruction": "新建 skill"},
+                        allowed=frozenset({"edit_by_command"}))
+    assert "skill 路径必须是 .harness/skills/<name>/SKILL.md" in obs2
+
+
 def test_edit_by_command_confirm_applies_alias(store, make_llm):
     old_bytes = _char_bytes(store)
     edits = json.dumps([{"path": "characters/陆昭.md",
