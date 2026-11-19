@@ -170,6 +170,24 @@ def _assert_no_transient_markers(text: str) -> None:
         assert marker not in text, f"观测泄漏瞬时词 {marker!r}：{text!r}"
 
 
+async def test_finalize_triggers_git_snapshot(store, make_llm, monkeypatch):
+    """P35 挂点：⑦ 定稿落盘（status=done）后 auto_snapshot（reason=定稿，detail 含章号/标题/字数）。"""
+    import harness.snapshot as snap
+
+    recorded = []
+    monkeypatch.setattr(snap, "auto_snapshot",
+                        lambda root, reason, detail="": recorded.append((reason, detail)))
+    write_chapters(store, [chapter(1, "题一", beats("一之起", "一之承"))])
+    llm, _calls = make_llm(default_router)
+    result = await run_tool(store, llm, Collector(), {"plot_id": "1-1"})
+    assert result is not None
+    assert store.read_chapter(1).meta.get("status") == "done"
+    assert len(recorded) == 1
+    reason, detail = recorded[0]
+    assert reason == "定稿"
+    assert "第1章" in detail and "题一" in detail and "字" in detail
+
+
 async def test_l2_crash_leaves_chapter_writing_not_done(store, make_llm, monkeypatch):
     """**L2**：写作链中途崩 → 章留在 **status="writing"**（不是 "done"）。
 

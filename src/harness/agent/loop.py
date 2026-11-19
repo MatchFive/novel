@@ -627,6 +627,9 @@ class AgentLoop:
         if choice.indices == [0]:
             self.state.stats["plan_confirmed"] = True
             self.events.append("plan_approved", {"question": question, "picked": "确认规划"})
+            # git 自动快照（拍板⑧）：审批通过即 commit；失败静默降级
+            from harness.snapshot import auto_snapshot
+            auto_snapshot(self.events.root, "审批通过", "规划确认门")
             return "规划已确认", "ok"
         self.events.append("plan_rejected", {"question": question, "picked": "需要修改"})
         return "规划被驳回：请按用户意见调整后重新提交", "noop"

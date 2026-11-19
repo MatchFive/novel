@@ -83,6 +83,10 @@ def create_project(library_root: Path, title: str, story: dict | None = None) ->
     (path / "outline" / "arcs.md").write_text("# 卷骨架\n", encoding="utf-8")
     (path / "memory" / "state.md").write_text("# 现状快照\n\n## 角色现状\n\n## 世界现状\n", encoding="utf-8")
 
+    # git 自动快照（拍板⑧，P35）：建项目即 git init + .gitignore（.harness/ 不进库）
+    from harness.snapshot import ensure_repo
+    ensure_repo(path)
+
     return ProjectInfo(path=path, title=title)
 
 

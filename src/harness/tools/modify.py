@@ -387,6 +387,11 @@ async def edit_by_command(store: ProjectStore, llm: OpenAICompatClient, prompts:
         else:
             notes.append(f"{path}（{note}）")
     lines = [f"edit_by_command：已应用 {len(applied)} 个文件" + ("：" + "、".join(applied) if applied else "")]
+    if applied:
+        # git 自动快照（拍板⑧）：批量设定变更落盘即 commit；失败静默降级
+        from harness.snapshot import auto_snapshot
+        auto_snapshot(store.root, "批量设定变更",
+                      f"edit_by_command {len(applied)} 个文件（{'、'.join(applied)}）")
     if unchanged:
         lines.append("无变化：" + "、".join(unchanged))
     if notes:

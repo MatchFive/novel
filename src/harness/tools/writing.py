@@ -648,6 +648,9 @@ async def _write_one_chapter(store: ProjectStore, llm: OpenAICompatClient, provi
         doc.meta = meta
         doc.body = body
         store.write_chapter(doc)
+        # git 自动快照（拍板⑧）：定稿即 commit；失败静默降级（绝不拖垮写作链）
+        from harness.snapshot import auto_snapshot
+        auto_snapshot(store.root, "定稿", f"第{seq}章「{title}」（{words} 字）")
 
     verdict = "通过" if pass_review else f"未通过（{len(blocking)} 条待处理）"
     line = f"第{seq}章「{title}」：{words} 字，审核{verdict}"

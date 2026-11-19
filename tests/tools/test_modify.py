@@ -94,6 +94,26 @@ def _char_bytes(store):
     return (store.root / "characters" / "陆昭.md").read_bytes()
 
 
+def test_edit_by_command_applied_triggers_git_snapshot(store, make_llm, monkeypatch):
+    """P35 挂点：应用成功（applied 非空）→ auto_snapshot（reason=批量设定变更）。"""
+    import harness.snapshot as snap
+
+    recorded = []
+    monkeypatch.setattr(snap, "auto_snapshot",
+                        lambda root, reason, detail="": recorded.append((reason, detail)) or "abc1234")
+    edits = json.dumps([{"path": "characters/陆昭.md",
+                         "content": _alias_card(["昭哥", "昭公子"])}], ensure_ascii=False)
+    llm, _ = make_llm([edits])
+    ui = FakeUI(choice=Choice(indices=[0]))
+    reg = make_registry(store, llm, ui)
+    reg.execute("edit_by_command", {"instruction": "给陆昭加别名昭公子"},
+                allowed=frozenset({"edit_by_command"}))
+    assert len(recorded) == 1
+    reason, detail = recorded[0]
+    assert reason == "批量设定变更"
+    assert "1 个文件" in detail and "characters/陆昭.md" in detail
+
+
 def test_edit_by_command_confirm_applies_alias(store, make_llm):
     old_bytes = _char_bytes(store)
     edits = json.dumps([{"path": "characters/陆昭.md",

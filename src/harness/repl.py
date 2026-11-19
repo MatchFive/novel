@@ -82,6 +82,7 @@ _HELP = """可用命令：
   /skill import <路径> [--project]  导入外部 skill（单文件或整目录；默认用户级）
   /answer      非 TTY 审批应答：/answer 1 2 备注:...（写 .harness/pending.answer，
                首行自动带本轮轮次——迟到的回答不进下一轮）
+  /snapshot    手动 git 快照（harness 快照：手动快照）
   /help        显示本帮助
   /quit        退出
 其他无前缀输入视为自然语言 brief，直接进入员工主循环。"""
@@ -299,6 +300,17 @@ def _cmd_checklist(store: ProjectStore, arg: str) -> None:
         return
     print(f"编辑：{path}")
     _open_in_editor(path)
+
+
+def _cmd_snapshot(store: ProjectStore) -> None:
+    """手动 git 快照（P35，拍板⑧）：项目文件夹即 git 仓库，``/snapshot`` 立即 commit。"""
+    from harness.snapshot import auto_snapshot
+
+    commit = auto_snapshot(store.root, "手动快照")
+    if commit is None:
+        print("未生成快照（无变更、git 不可用，或已失败并记录日志）")
+    else:
+        print(f"快照已提交：{commit}")
 
 
 # ------------------------------------------------------------------ run 会话（委托 harness.session）
@@ -892,6 +904,7 @@ def run_repl(project: ProjectInfo, store: ProjectStore, *, resume: bool = False,
         "/check": lambda arg: _cmd_check(sess, arg),
         "/skills": lambda arg: _cmd_skills(sess),
         "/checklist": lambda arg: _cmd_checklist(store, arg),
+        "/snapshot": lambda arg: _cmd_snapshot(store),
         "/skill": lambda arg: _cmd_skill(sess, arg),
         "/answer": lambda arg: _cmd_answer(sess, arg),
         "/help": lambda arg: print(_HELP),

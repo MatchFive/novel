@@ -271,6 +271,24 @@ def test_parallel_readonly_calls_in_one_step(store):
     assert {e["payload"]["tool"] for e in results} == {"list_world", "list_characters"}
 
 
+def test_plan_approval_triggers_git_snapshot(store, monkeypatch):
+    """P35 挂点：规划确认门通过（plan_approved 落盘后）→ auto_snapshot（reason=审批通过）。"""
+    import harness.snapshot as snap
+
+    recorded = []
+    monkeypatch.setattr(snap, "auto_snapshot",
+                        lambda root, reason, detail="": recorded.append((Path(root), reason, detail)))
+    approve = json.dumps({"thought": "规划已好，请确认", "action": "request_plan_approval",
+                          "args": {}}, ensure_ascii=False)
+    loop, _llm, _events, _state = make_loop(store, [approve, _finish()])
+    asyncio.run(loop.run())
+    assert len(recorded) == 1
+    root, reason, detail = recorded[0]
+    assert root == store.root
+    assert reason == "审批通过"
+    assert detail == "规划确认门"
+
+
 def test_step_plan_flow_actions(store):
     script = [
         json.dumps({"thought": "先拆步", "action": "set_step_plan",
