@@ -1,6 +1,8 @@
-/// 事件流主屏（§4.4）：SSE 消费 + 20 种 kind → 卡片映射 + 折叠 + 环形缓冲 + draft 进度聚合。
-/// 布局衔接 Task 7：TaskBar 在上，卡片流在下；展开状态只存内存（§7.2），
-/// 环形缓冲 useReducer 上限 5000 条丢最旧（§7.3）。
+/// 对话式事件流主屏（DeepSeek-harness 风格交互）：
+/// SSE 消费 + 事件 → **对话气泡**映射——run_started = 用户气泡（右），
+/// agent_step + 紧随其后的 tool_result = 助理回合（左，思考/工具调用折叠在体内），
+/// 其余 kind = 居中细行/横幅。输入框（TaskBar）钉在底部，新消息自动吸底。
+/// 展开状态只存内存（§7.2），环形缓冲 useReducer 上限 5000 条丢最旧（§7.3）。
 
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { fetchPending } from "../api/approvals";
@@ -80,6 +82,59 @@ function toDisplayItems(events: StreamEvent[]): DisplayItem[] {
   return items;
 }
 
+// ---------------------------------------------------------------- 对话分组
+
+/**
+ * 事件 → 对话项：
+ * - run_started = 用户气泡（一次 run 一条，重开 run 另起一条）；
+ * - agent_step = 助理回合起点，紧随其后的 tool_result 折进同一回合（Claude Code 式）；
+ * - 其余（含 draft 聚合组）= 系统项，沿用原细行/横幅渲染。
+ */
+type ChatItem =
+  | { type: "user"; key: number; raw: string; deliverables: string[] }
+  | { type: "assistant"; key: number; event: StreamEvent; tools: StreamEvent[] }
+  | { type: "system"; key: number; item: DisplayItem };
+
+function toChatItems(displayItems: DisplayItem[]): ChatItem[] {
+  const items: ChatItem[] = [];
+  let cur: Extract<ChatItem, { type: "assistant" }> | null = null;
+  const flush = () => {
+    if (cur !== null) {
+      items.push(cur);
+      cur = null;
+    }
+  };
+  for (const d of displayItems) {
+    if (d.type === "draft") {
+      flush();
+      items.push({ type: "system", key: d.group.rowKey, item: d });
+      continue;
+    }
+    const e = d.event;
+    if (e.kind === "run_started") {
+      flush();
+      const del = Array.isArray(e.payload.deliverables)
+        ? e.payload.deliverables.filter((v): v is string => typeof v === "string")
+        : [];
+      items.push({ type: "user", key: e.seq, raw: str(e.payload.raw), deliverables: del });
+      continue;
+    }
+    if (e.kind === "agent_step") {
+      flush();
+      cur = { type: "assistant", key: e.seq, event: e, tools: [] };
+      continue;
+    }
+    if (e.kind === "tool_result" && cur !== null) {
+      cur.tools.push(e);
+      continue;
+    }
+    flush();
+    items.push({ type: "system", key: e.seq, item: d });
+  }
+  flush();
+  return items;
+}
+
 // ---------------------------------------------------------------- 审批状态机（§4.5）
 
 /**
@@ -124,6 +179,9 @@ export function EventStream() {
   // 连接状态（Task 20）：null = 尚未连上（首连中），true = 已连接，false = 断线重连中。
   const [connected, setConnected] = useState<boolean | null>(null);
   const maxSeqRef = useRef(0);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** 吸底闩：用户滚离底部 ≥80px 后不再自动吸底（回底后重新吸）。 */
+  const stickRef = useRef(true);
 
   useEffect(() => {
     dispatch({ type: "reset" });
@@ -132,6 +190,7 @@ export function EventStream() {
     setPending(null);
     setDialogOpen(false);
     setConnected(null);
+    stickRef.current = true;
     reset();  // 展开集随项目重置（Task 20 多项目切换）
 
     // §4.5.3 页面重开：pending 还挂着（run 无限等）→ GET pending 有值 → 重新弹窗。
@@ -197,6 +256,19 @@ export function EventStream() {
   }, [projectId]);
 
   const displayItems = useMemo(() => toDisplayItems(events), [events]);
+  const chatItems = useMemo(() => toChatItems(displayItems), [displayItems]);
+
+  /** 新对话项到达时吸底（用户贴底才吸；上翻阅读时不打断）。 */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+  }, [chatItems, pending]);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   /** chapter_start 的 target_words（draft 进度条宽度用）。 */
   const targetByChapter = useMemo(() => {
@@ -261,10 +333,8 @@ export function EventStream() {
   };
 
   return (
-    <div className="view view-stream">
-      <h2>事件流</h2>
-      <TaskBar />
-      <div className="stream-toolbar">
+    <div className="view view-chat">
+      <div className="chat-toolbar">
         <button
           type="button"
           className="btn-ghost"
@@ -278,7 +348,7 @@ export function EventStream() {
         </button>
         {hello && (
           <span className="muted stream-hello">
-            已连接 · {hello.project} · last_seq {hello.last_seq} · 缓冲 {events.length} 条
+            已连接 · {hello.project} · 缓冲 {events.length} 条
           </span>
         )}
         {/* 断流可见（Task 7 ④ / Task 10 ③）：断连/首连中时给状态提示，不静默。 */}
@@ -291,30 +361,62 @@ export function EventStream() {
           <span className="muted stream-hello">连接中…</span>
         )}
       </div>
-      <div className="stream-body">
-      {displayItems.length === 0 && (
-        <p className="muted">（暂无事件——起个 run 就能看到员工在干什么）</p>
-      )}
-        {displayItems.map((item) =>
-          item.type === "draft" ? (
-            <DraftProgress
-              key={`draft-${item.group.rowKey}`}
-              chapterSeq={item.group.chapterSeq}
-              phase={item.group.phase}
-              beat={item.group.beat}
-              chars={item.group.chars}
-              targetWords={targetByChapter.get(item.group.chapterSeq) ?? null}
-            />
-          ) : (
-            <EventCard
-              key={item.event.seq}
-              event={item.event}
-              expanded={expanded.has(item.event.seq)}
-              onToggle={() => toggle(item.event.seq)}
-              toolCtx={stepContext.get(item.event.seq)}
-            />
-          ),
+      <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
+        {chatItems.length === 0 && (
+          <p className="muted">（暂无消息——在下方输入任务，员工会在这里逐步汇报进展）</p>
         )}
+        {chatItems.map((item) => {
+          if (item.type === "user") {
+            return (
+              <div className="chat-row user" key={item.key}>
+                <div className="chat-bubble user">
+                  <div className="chat-raw">{item.raw}</div>
+                  {item.deliverables.length > 0 && (
+                    <div className="chat-deliverables">交付物：{item.deliverables.join(" / ")}</div>
+                  )}
+                </div>
+              </div>
+            );
+          }
+          if (item.type === "assistant") {
+            const seq = item.event.seq;
+            return (
+              <div className="chat-row assistant" key={item.key}>
+                <div className="chat-bubble assistant">
+                  <ThoughtCard
+                    seq={seq}
+                    payload={item.event.payload}
+                    expanded={expanded.has(seq)}
+                    onToggle={() => toggle(seq)}
+                  />
+                  {item.tools.map((t) => (
+                    <ToolResultCard
+                      key={t.seq}
+                      seq={t.seq}
+                      tool={str(t.payload.tool, "?")}
+                      observation={str(t.payload.observation)}
+                      args={stepContext.get(t.seq)?.args ?? {}}
+                      durationMs={stepContext.get(t.seq)?.durationMs ?? null}
+                      expanded={expanded.has(t.seq)}
+                      onToggle={() => toggle(t.seq)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div className="chat-system" key={item.key}>
+              <SystemItem
+                item={item.item}
+                expanded={expanded}
+                onToggle={toggle}
+                toolCtx={stepContext}
+                targetByChapter={targetByChapter}
+              />
+            </div>
+          );
+        })}
         {/* §4.5.1 审批两种形态：未答 → 琥珀占位（可点重开弹窗）；已答 → 一行嵌入。 */}
         {pending && !pending.answered && (
           <button
@@ -334,6 +436,7 @@ export function EventStream() {
           />
         )}
       </div>
+      <TaskBar />
       {/* 弹窗盖主区；「稍后再说」只关弹窗，琥珀占位留着。 */}
       {/* key=question：换问题时强制重挂载，清空上一次的 selected/note，防静默错答 */}
       {dialogOpen && pending && !pending.answered && (
@@ -353,7 +456,45 @@ export function EventStream() {
   );
 }
 
+// ---------------------------------------------------------------- 系统项渲染（原 20 种 kind 映射，§4.4.1）
+
+function SystemItem({
+  item,
+  expanded,
+  onToggle,
+  toolCtx,
+  targetByChapter,
+}: {
+  item: DisplayItem;
+  expanded: Set<number>;
+  onToggle: (seq: number) => void;
+  toolCtx: Map<number, { args: Record<string, unknown>; durationMs: number | null }>;
+  targetByChapter: Map<number, number>;
+}) {
+  if (item.type === "draft") {
+    return (
+      <DraftProgress
+        chapterSeq={item.group.chapterSeq}
+        phase={item.group.phase}
+        beat={item.group.beat}
+        chars={item.group.chars}
+        targetWords={targetByChapter.get(item.group.chapterSeq) ?? null}
+      />
+    );
+  }
+  return (
+    <EventCard
+      event={item.event}
+      expanded={expanded.has(item.event.seq)}
+      onToggle={() => onToggle(item.event.seq)}
+      toolCtx={toolCtx.get(item.event.seq)}
+    />
+  );
+}
+
 // ---------------------------------------------------------------- 卡片映射（§4.4.1，20 种 kind）
+// 对话式布局下，agent_step / tool_result / run_started 由 ChatItem 分组逻辑消费，
+// 这里保留其余 kind 的渲染（含防御性兜底——分组遗漏时也能渲染）。
 
 function EventCard({
   event,
@@ -369,7 +510,7 @@ function EventCard({
   const { seq, kind, payload } = event;
 
   switch (kind) {
-    // 思考卡 + say 行
+    // 思考卡 + say 行（assistant 回合内已由 ChatItem 直接渲染；此为兜底）
     case "agent_step":
       return (
         <ThoughtCard seq={seq} payload={payload} expanded={expanded} onToggle={onToggle} />
@@ -394,7 +535,7 @@ function EventCard({
       );
     }
 
-    // 顶部横幅（一次 run 一条）
+    // 顶部横幅（一次 run 一条；对话式下 run_started 由用户气泡渲染，此为兜底）
     case "run_started":
       return (
         <div className="stream-banner banner-start">

@@ -17,7 +17,7 @@ interface NavItem {
 }
 
 const NAV: NavItem[] = [
-  { key: "events", label: "事件流", icon: "📡", count: (c) => c.events_last_seq },
+  { key: "events", label: "对话", icon: "💬", count: (c) => c.events_last_seq },
   { key: "outline", label: "大纲", icon: "🧭", count: (c) => c.volumes },
   { key: "chapters", label: "章节", icon: "📑", count: (c) => c.chapters },
   { key: "prose", label: "正文", icon: "📖", count: (c) => c.prose },
