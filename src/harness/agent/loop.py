@@ -36,6 +36,12 @@ from harness.run.memory import WorkMemory
 from harness.run.state import RunState
 from harness.run.whitelist import allowed_for_run
 from harness.store.project import ProjectStore
+from harness.tools.characters import (
+    build_characters,
+    delete_character,
+    draft_character,
+    update_character,
+)
 from harness.tools import (
     check_plots,
     edit_by_command,
@@ -283,7 +289,9 @@ class AgentLoop:
                     per_tool = {action: outcome}
                 elif action in ("plan_arcs", "edit_by_command", "master_plan", "plan_chapters",
                                 "write_plot", "extract_memory", "web_search",
-                                "check_plots", "global_check"):
+                                "check_plots", "global_check",
+                                "draft_character", "update_character",
+                                "delete_character", "build_characters"):
                     obs, outcome, tool_usage = await self._async_tool(action, decision.args)
                     obs = _zero_change_sibling_hint(obs)   # P32/A8c：撞「零变更」指路同类工具
                     per_tool = {action: outcome}
@@ -449,6 +457,21 @@ class AgentLoop:
             elif action == "global_check":
                 result = await global_check(self.store, self.llm, self.prompts,
                                             self.settings, args)
+            elif action == "draft_character":
+                # P40c：四角色工具核心均为协程，必须在本循环 await——走 _sync_tool 的
+                # to_thread → _run_sync 会让 LLM client（连接池属本循环）跨循环复用，
+                # 调用挂死至 600s 超时（实跑复现）。与 write_plot 同纪律：按名字走 await。
+                result = await draft_character(self.store, self.llm, self.prompts,
+                                               self.settings, args)
+            elif action == "update_character":
+                result = await update_character(self.store, self.llm, self.prompts,
+                                                self.settings, args)
+            elif action == "delete_character":
+                result = await delete_character(self.store, self.llm, self.prompts,
+                                                self.settings, args)
+            elif action == "build_characters":
+                result = await build_characters(self.store, self.llm, self.prompts,
+                                                self.settings, self.ui, args)
             else:
                 result = await edit_by_command(self.store, self.llm, self.prompts, self.ui, args,
                                               emit=self.events.append, settings=self.settings)
