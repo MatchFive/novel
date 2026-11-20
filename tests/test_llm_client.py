@@ -92,6 +92,18 @@ async def test_starved_at_max_tokens_kind():
     assert ei.value.kind == "starved" and ei.value.transient is True
 
 
+@pytest.mark.parametrize("finish", ["content_filter", None])
+async def test_empty_content_odd_finish_reason_is_empty_not_api(finish):
+    """空内容 + 非 stop/length 的 finish_reason（如 content_filter / None）此前判 kind="api"
+    ——complete_structured 的扩额阶梯只重试 starved/empty，api 一次即败且语义骗人
+    （并非 API 错误，DeepSeek-flash 实测会偶发空响应）。应判 empty 进阶梯重试。"""
+    def handler(req):
+        return httpx.Response(200, json={"choices": [{"message": {"content": ""}, "finish_reason": finish}]})
+    with pytest.raises(LLMError) as ei:
+        await make_client(handler).complete([{"role": "user", "content": "hi"}], model="m")
+    assert ei.value.kind == "empty"
+
+
 async def test_timeout_is_transient():
     async def run():
         def handler(req):

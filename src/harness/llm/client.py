@@ -246,8 +246,11 @@ class OpenAICompatClient:
             content = _THINK_RE.sub("", choice.message.content or "").strip()
             if not content:
                 # 思考模式吃满 max_tokens 时 content 会是空的（推理都在 reasoning_content 里）
-                kind = "starved" if finish_reason == "length" else (
-                    "empty" if finish_reason == "stop" else "api")
+                # 空内容只分两类：length=截断(starved)；其余（stop/content_filter/None…）
+                # 一律 empty——complete_structured 阶梯对 empty 扩额重试一次。此前把非
+                # stop 的 odd finish_reason 判成 "api"（无重试且语义骗人：并无 API 错误，
+                # DeepSeek-flash 偶发空响应即死在这条上，见 P40）。
+                kind = "starved" if finish_reason == "length" else "empty"
                 raise LLMError("empty_response", transient=finish_reason == "length",
                                finish_reason=finish_reason, kind=kind)
             sdk_usage = resp.usage
