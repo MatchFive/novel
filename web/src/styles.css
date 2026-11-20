@@ -13,8 +13,17 @@
   box-sizing: border-box;
 }
 
+/* 舞台式骨架：窗口即应用。body 永不出现页面级滚动条——滚动只发生在
+   侧栏内部（书单）与主区内部（各视图）。 */
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  overflow: hidden;
   font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
   color: #22222a;
   background: var(--bg);
@@ -67,17 +76,22 @@ h4 {
 
 .layout {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
+/* 主区 = 独立滚动列：文档视图在内部滚，侧栏固定不动。 */
 .main {
   flex: 1;
-  padding: 24px 32px;
   min-width: 0;
+  height: 100%;
+  overflow-y: auto;
 }
 
 .view {
   max-width: 960px;
+  padding: 24px 32px;
 }
 
 /* ---------------------------------------------------------------- 侧栏 */
@@ -89,9 +103,7 @@ h4 {
   flex-direction: column;
   border-right: 1px solid var(--border);
   background: #f4f4f1;
-  height: 100vh;
-  position: sticky;
-  top: 0;
+  overflow-y: auto;
 }
 
 .sidebar-brand {
@@ -1242,8 +1254,14 @@ h4 {
     --sidebar-width: 56px;
   }
 
-  .main {
+  /* .main 永不带 padding（否则高度 100% 的聊天列会溢出出主区滚动条）；
+     窄屏收紧的是 .view 的 padding。 */
+  .view {
     padding: 16px;
+  }
+
+  .view-chat {
+    padding: 8px 10px 0;
   }
 
   .sidebar-brand {
@@ -1327,7 +1345,11 @@ h4 {
 /* ---- 对话式事件流（chat-style：用户气泡右 / 助理回合左 / 输入钉底） ---- */
 .view-chat {
   max-width: none;
-  height: calc(100vh - 48px);
+  height: 100%;
+  display: flex;
+  /* 顶部给工具条呼吸位；左右与消息流对齐；底部零 padding——TaskBar 自己带边距，
+     且作为 flex 末段常驻可视区底部。 */
+  padding: 12px 20px 0;
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
@@ -1340,11 +1362,16 @@ h4 {
 }
 .chat-scroll {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 8px 4px;
+}
+/* 输入框钉在对话列底部：不伸缩、不被消息流顶走。 */
+.view-chat > .taskbar {
+  flex: none;
 }
 .chat-row {
   display: flex;
