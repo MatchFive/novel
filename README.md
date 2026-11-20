@@ -36,9 +36,9 @@ default_tier = "standard"        # 默认档位：lite / standard / pro
 [providers.deepseek]
 base_url = "https://api.deepseek.com/v1"
 api_key = "sk-..."
-lite = "deepseek-chat"           # 三档模型：轻量活（摘要/校对）
-standard = "deepseek-chat"       # 标准活（初稿）
-pro = "deepseek-reasoner"        # 重活（结构审查/大改）
+lite = "deepseek-flash"           # 三档模型：轻量活（摘要/校对）
+standard = "deepseek-flash"       # 标准活（初稿）
+pro = "deepseek-pro"              # 重活（结构审查/大改）
 ```
 
 每个 provider 必须五字段齐全（`base_url` / `api_key` / `lite` / `standard` / `pro`）。
