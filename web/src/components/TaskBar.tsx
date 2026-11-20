@@ -5,7 +5,7 @@ import { useState } from "react";
 import { apiPost, ApiError } from "../api/client";
 import { useSession } from "../state/session";
 
-const DELIVERABLE_HINT = "可用交付物：outline（大纲）/ chapters（章节规划）/ prose（正文）/ 等，逗号分隔；缺省 outline";
+const DELIVERABLE_HINT = "可用交付物：outline（大纲）/ chapters（章节规划）/ draft（正文）/ characters（角色卡）/ 等，逗号分隔；缺省 outline";
 
 export function TaskBar() {
   const { projectId, refreshCounts } = useSession();

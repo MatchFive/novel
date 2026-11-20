@@ -1265,3 +1265,24 @@ def test_web_facts_block_selection(tmp_path):
     assert "内政 屯田 征兵 系统" in block        # 与本章最相关（共享 trigram）
     assert len(block) <= 1200
     assert block.count("· ") <= 3                # top-3
+
+
+# ------------------------------------------------------------------ components 接线回归钉
+
+def test_repl_components_register_write_plot(tmp_path, monkeypatch):
+    """RunSession.components 组装 registry 时注册 write_plot（否则 agent 永远调不到：
+    白名单 TOOLS_ALL 含它、loop _async_tool 有它的 await 分支，唯独 registry 缺注册 →
+    提示词工具签名（loop._tool_signatures 取 registry.names）里没有它，模型看不见）。
+    与 test_check.py::test_repl_components_register_check_tools /
+    test_web.py::test_repl_components_register_web_search 同款事故第三起。"""
+    from harness.session import RunSession
+
+    info = create_project(tmp_path, "接线书")
+    store = ProjectStore(info.path)
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    settings = make_settings()
+
+    registry = RunSession(info, store, settings).components().registry
+
+    assert "write_plot" in registry.names
+    assert registry.is_read_only("write_plot") is False

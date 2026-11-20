@@ -137,6 +137,13 @@ class RunSession:
         # P6 check_plots/global_check：同上（落 issues + 调 LLM 的写工具）。
         register_check_tools(registry, store=self.store, llm=llm, prompts=prompts,
                              settings=self.settings)
+        # P3 write_plot：注册进 registry——缺它则提示词工具签名（loop._tool_signatures
+        # 取 registry.names）没有 write_plot，白名单放行模型也看不见（第三起同款事故：
+        # check/web 已各钉一回归测试，见 tests/tools/test_writing.py::
+        # test_repl_components_register_write_plot）。loop 按名字走 _async_tool await 分支。
+        from harness.tools import register_writing_tools
+        register_writing_tools(registry, store=self.store, llm=llm, prompts=prompts,
+                               settings=self.settings, ui=ui)
         # Task 17 draft_character：只起草不落卡的写流程工具（LLM 一次调用；registry
         # 同步边界走 _run_sync，loop 经 _sync_tool 的 asyncio.to_thread 驱动）。
         # P24 build_characters：自动建卡司（规划+起草+人确认门落卡）——ui 注入确认门
