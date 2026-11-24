@@ -36,12 +36,6 @@ from harness.run.memory import WorkMemory
 from harness.run.state import RunState
 from harness.run.whitelist import allowed_for_run
 from harness.store.project import ProjectStore
-from harness.tools.characters import (
-    build_characters,
-    delete_character,
-    draft_character,
-    update_character,
-)
 from harness.tools import (
     check_plots,
     edit_by_command,
@@ -52,6 +46,12 @@ from harness.tools import (
     plan_chapters,
     web_search,
     write_plot,
+)
+from harness.tools.characters import (
+    build_characters,
+    delete_character,
+    draft_character,
+    update_character,
 )
 from harness.tools.registry import ToolRegistry
 

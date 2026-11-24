@@ -20,6 +20,7 @@ __all__ = [
     "FULL_REWRITE_TYPES",
     "KEEP_BEAT_FACTOR",
     "KEEP_WHOLE_FACTOR",
+    "LENGTH_HARD_CAP",
     "LENGTH_LONG_FACTOR",
     "LENGTH_SHORT_FACTOR",
     "MAX_BEAT_REWRITES",
@@ -35,6 +36,7 @@ __all__ = [
     "beat_index_at",
     "beat_word_budgets",
     "is_keep_whole",
+    "length_cap",
     "locate_for_target",
     "max_chars_beat",
     "max_chars_deaify",
@@ -59,7 +61,8 @@ REPORT_ONLY_TYPES = frozenset({"ai_flavor", "length"})
 # 只有这些**结构性**问题允许「整章重写」兜底（跨拍/与细纲整体不符，按拍改不了）。
 # 其它问题定位不到节拍时不再整章重写——整章重写会洗牌全文、审核问题反而越修越多
 # （真实事故：用户点「再修一轮」6 条 → 8 条），改为**如实上报**未落实的意见（seed 143）。
-FULL_REWRITE_TYPES = frozenset({"outline"})
+# P41：length_over（超章长硬顶）也是结构性问题——按拍改不了「整章太长」，只能整章压缩。
+FULL_REWRITE_TYPES = frozenset({"outline", "length_over"})
 # 去味最多改写轮数（每轮复检、择优不劣化）（seed 144）。
 DEAIFY_ROUNDS = 2
 
@@ -76,6 +79,20 @@ BUDGET_CHARS = 40000
 # 审核长度护栏：当前字数 < 目标 × 0.85 记「偏短」；> 目标 × 1.6 记「偏长」（seed 1001/1009）。
 LENGTH_SHORT_FACTOR = 0.85
 LENGTH_LONG_FACTOR = 1.6
+# 章长**硬顶**（P41，用户 2026-11-24 指令「不能超过5000字一章」）：超过即 blocking
+# （type=length_over，整章压缩），压不下来章判未成功、不置 done。偏短仍只上报
+# （length ∈ REPORT_ONLY_TYPES 语义不动）——字数不足的正解是补细纲，不靠注水。
+LENGTH_HARD_CAP = 5000
+
+
+def length_cap(target: int) -> int:
+    """本章字数硬顶：``max(min(目标 × 1.6, LENGTH_HARD_CAP), 目标)``。
+
+    三档语义：① 常规目标（≤3125）→ 1.6× 目标（与原「偏长」阈值同值，但从上报升级为
+    门禁）；② 目标 3125–5000 → 压回 5000 硬顶；③ 目标本身 >5000 → 目标优先
+    （门禁不能比目标还低，否则永远写不达标）。
+    """
+    return max(min(int(target * LENGTH_LONG_FACTOR), LENGTH_HARD_CAP), target)
 # 截断防护：整章路径的新稿 < 旧稿 × 0.7 大概率是 max_tokens 截断残稿，保留旧稿
 # （seed 1198/1330）。
 KEEP_WHOLE_FACTOR = 0.7

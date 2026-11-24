@@ -1286,3 +1286,92 @@ def test_repl_components_register_write_plot(tmp_path, monkeypatch):
 
     assert "write_plot" in registry.names
     assert registry.is_read_only("write_plot") is False
+
+
+# ---------------------------------------------------------------- P41 章长硬顶（≤5000 字）
+
+
+def test_length_cap_values():
+    """硬顶公式 cap = max(min(1.6×目标, 5000), 目标)：永不超 5000（用户 2026-11-24
+    指令「不能超过5000字一章」），目标本身超 5000 时目标优先（门禁不能比目标还低），
+    也永不低过目标（否则永远写不达标）。"""
+    from harness.writing.pure import length_cap
+    assert length_cap(3000) == 4800     # 1.6×3000=4800 < 5000 → 取 1.6×
+    assert length_cap(4000) == 5000     # 1.6×4000=6400 超硬顶 → 压回 5000
+    assert length_cap(2500) == 4000
+    assert length_cap(8000) == 8000     # 目标 > 硬顶 → 目标优先
+
+
+def _over_cap_router(state, *, compressions):
+    """P41 测试路由：逐拍写 3200×2≈6400 字（超 4800 硬顶）；【待修正正文】整章压缩
+    按 compressions 队列依次出稿；审核恒通过（无逻辑问题，只有字数问题）。"""
+    def router(body):
+        prompt = body["messages"][-1]["content"]
+        if body.get("stream"):
+            if "【待修正正文】" in prompt:                # task.draft_revise 整章压缩
+                out = compressions[min(state["revise"], len(compressions) - 1)]
+                state["revise"] += 1
+                return {"chunks": out, "usage": U(5, 10)}
+            assert "【任务】" in prompt and "只写" in prompt
+            state["draft"] += 1
+            return {"chunks": draft_chunks(3200), "usage": U(5, 10)}
+        if "【资源目录（可挑选的内容）】" in prompt:
+            return SELECT_OK, U(1, 2)
+        if "【待审正文】" in prompt:
+            return REVIEW_PASS, U(3, 4)
+        if "你是小说记忆整理员" in prompt:
+            return EXTRACT_OK, U(2, 3)
+        raise AssertionError(f"路由不到任何模板锚点：{prompt[:80]}…")
+    return router
+
+
+async def test_over_cap_chapter_compressed_then_done(store, make_llm):
+    """P41：正文超硬顶 → length_over 成 blocking（不再只上报）→ 整章压缩达标 → 置 done。
+
+    压缩稿 3000 字 < 原稿 70%（4480）——同时钉住「length_over 驱动时整章重写的
+    截断防护下限换成目标 0.85×（防过度压缩），不再按原稿 70%」（否则真压缩必被
+    误判截断、永远保留超标原稿）。"""
+    write_chapters(store, [chapter(1, "题一", beats("一之起", "一之承"))])
+    state = {"draft": 0, "revise": 0}
+    llm, _calls = make_llm(_over_cap_router(state, compressions=[draft_chunks(3000)]))
+    collector = Collector()
+    result = await run_tool(store, llm, collector, {"plot_id": "1-1"})
+    doc = store.read_chapter(1)
+    assert state["revise"] == 1                        # 整章压缩真的跑了
+    assert doc.meta["status"] == "done"
+    assert doc.meta["word_count"] <= 4800
+    assert "未成功" not in result.text
+
+
+async def test_over_cap_compression_iterates_until_under_cap(store, make_llm):
+    """P41：一轮压缩仍超硬顶（6400→5600）→ 计数未降但**严格变短**也收下继续压
+    （length_over 专用收敛放宽），第二轮压到 2900 达标 → done。
+
+    没有这条放宽：收敛守卫「计数未严格减少即停」会在第一轮就停在 5600/6400，
+    永远到不了硬顶以内。"""
+    write_chapters(store, [chapter(1, "题一", beats("一之起", "一之承"))])
+    state = {"draft": 0, "revise": 0}
+    llm, _calls = make_llm(_over_cap_router(
+        state, compressions=[draft_chunks(5600), draft_chunks(2900)]))
+    collector = Collector()
+    result = await run_tool(store, llm, collector, {"plot_id": "1-1"})
+    doc = store.read_chapter(1)
+    assert state["revise"] == 2                        # 压了两轮才达标
+    assert doc.meta["status"] == "done"
+    assert doc.meta["word_count"] <= 4800
+    assert "未成功" not in result.text
+
+
+async def test_over_cap_chapter_uncompressible_not_done(store, make_llm):
+    """P41：压到 MAX_REVISE 仍超硬顶 → 章判未成功（字数超标）、不置 done——
+    留 status="writing" 半成品，下次 run 捡起来重做（L2 语义）；观测零瞬时词。"""
+    write_chapters(store, [chapter(1, "题一", beats("一之起", "一之承"))])
+    state = {"draft": 0, "revise": 0}
+    llm, _calls = make_llm(_over_cap_router(state, compressions=[draft_chunks(5600)]))
+    collector = Collector()
+    result = await run_tool(store, llm, collector, {"plot_id": "1-1"})
+    doc = store.read_chapter(1)
+    assert state["revise"] >= 1
+    assert "未成功（字数超标）" in result.text
+    _assert_no_transient_markers(result.text)
+    assert doc.meta["status"] == "writing"             # 不置 done：下次 run 重做

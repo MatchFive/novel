@@ -109,6 +109,7 @@ from harness.writing.pure import (
     WRITING_ROUTING,
     apply_replace_issues,
     beat_word_budgets,
+    length_cap,
     max_chars_beat,
     max_chars_single_shot,
     normalize_edges,
@@ -374,6 +375,21 @@ def _length_issue(short: bool, words: int, target: int) -> dict:
                            "或在拆章阶段把该情节拆成更多章后再写。")}
 
 
+def _length_over_issue(words: int, target: int, cap: int) -> dict:
+    """超章长硬顶问题（P41）：type=length_over ∈ FULL_REWRITE_TYPES → **blocking**，
+    走整章压缩；压到 MAX_REVISE 仍超 → ⑦ 终检判未成功、不置 done。
+
+    与 `_length_issue`（report-only）分工：偏短/轻微偏长仍只上报（正解是补细纲/
+    拆章，不靠改写凑）；只有**超硬顶**才升级成必须修掉的结构问题。
+    """
+    return {"type": "length_over",
+            "issue": (f"字数超硬顶：本章硬顶 {cap} 字（目标约 {target} 字），"
+                      f"实际约 {words} 字——必须压缩到硬顶以内"),
+            "suggestion": (f"整章压缩到 {cap} 字以内：收紧明显超长的节拍、删并重复"
+                           "描写与冗余过渡，保留情节骨架与关键伏笔；不得砍成梗概"
+                           f"（低于约 {int(target * LENGTH_SHORT_FACTOR)} 字视为过度压缩）。")}
+
+
 # ---------------------------------------------------------------- 单章五节点
 
 async def _write_one_chapter(store: ProjectStore, llm: OpenAICompatClient, provider,
@@ -519,8 +535,13 @@ async def _write_one_chapter(store: ProjectStore, llm: OpenAICompatClient, provi
     # 确定性 AI 味检测对全篇补齐（模型对自身套路有盲区）：report-only，不参与门禁
     report = detect(body)
     words = count_words(body)
+    cap = length_cap(target)
     if words < int(target * LENGTH_SHORT_FACTOR):
         issues = list(issues) + [_length_issue(True, words, target)]
+    elif words > cap:
+        # P41：超硬顶 → blocking（length_over ∈ FULL_REWRITE_TYPES，整章压缩兜底）；
+        # 压不下来 → ⑦ 终检判未成功。偏长但未超顶仍只上报（原 report-only 语义）。
+        issues = list(issues) + [_length_over_issue(words, target, cap)]
     elif words > int(target * LENGTH_LONG_FACTOR):
         issues = list(issues) + [_length_issue(False, words, target)]
     # 降门槛：只有逻辑类问题算「没过」；ai_flavor/length 只上报（REPORT_ONLY_TYPES）
@@ -638,6 +659,14 @@ async def _write_one_chapter(store: ProjectStore, llm: OpenAICompatClient, provi
                 notes.append("记忆提取失败")
     elif report.serious:
         notes.append("去味链未就绪（harness.writing.revise 缺失）——AI 味超标未处理")
+
+    # ---------------- ⑥.5 P41 章长硬顶终检：压缩后仍超顶 → 未成功，不置 done ----------------
+    # ⑤ 整章压缩 + ⑥ 去味都跑完后字数仍超 length_cap → 本章判未成功：留 status="writing"
+    # 半成品（L2 语义：下次 run 捡起来重做），绝不让超标章标 done 被幂等门永远跳过。
+    if words > length_cap(target):
+        usage_all = usage_add(usage_all, meter.total)
+        _refresh_corpus_paths(store, index, seq)
+        return False, "over_length", usage_all, "", body
 
     # ---------------- ⑦ 定稿：全部节点跑完才把 status 置 "done" ----------------
     # 中间态是 "writing"（L2）：中途崩溃 → 留在 "writing" → 下次 run 会重做这一章，

@@ -10,7 +10,9 @@ def test_constants():
     assert pure.MAX_BEAT_REWRITES == 3
     assert pure.DEAIFY_ROUNDS == 2
     assert pure.REPORT_ONLY_TYPES == frozenset({"ai_flavor", "length"})
-    assert pure.FULL_REWRITE_TYPES == frozenset({"outline"})
+    # P41：length_over（超硬顶）是结构性问题 → 允许整章重写（压缩）兜底
+    assert pure.FULL_REWRITE_TYPES == frozenset({"outline", "length_over"})
+    assert pure.LENGTH_HARD_CAP == 5000
     assert pure.BEAT_MIN_WORDS == 300
     assert pure.TAIL_PREV_CHAPTER == 2000
     assert pure.TAIL_BEAT == 1500

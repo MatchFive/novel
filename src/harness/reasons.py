@@ -13,7 +13,9 @@ from __future__ import annotations
 
 __all__ = ["REASON_LABELS", "reason_label"]
 
-REASON_LABELS = {"truncated": "无产出", "empty": "无产出"}
+REASON_LABELS = {"truncated": "无产出", "empty": "无产出",
+                 # P41：章长硬顶终检失败（压缩到 MAX_REVISE 仍超 length_cap）
+                 "over_length": "字数超标"}
 
 
 def reason_label(reason: str) -> str:

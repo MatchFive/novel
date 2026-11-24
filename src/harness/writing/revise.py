@@ -6,9 +6,11 @@
 
 `revise_until_converged`：blocking 意见三级路由——零 LLM 定点替换（`apply_replace_issues`）
 → 按拍重写（`locate_for_target`+`beat_index_at` 半开口径定位，≤MAX_BEAT_REWRITES 拍，
-新拍 <50% 保留原拍，`splice_with_spans` 保 spans）→ 整章重写（仅 outline 类结构性问题，
-<70% 保留原版、spans 作废）；每轮复审（重跑 draft_review），**收敛守卫**：blocking 计数
-不再严格减少即停、硬顶 MAX_REVISE，全程 best 跟踪（返回问题最少的那一版）。
+新拍 <50% 保留原拍，`splice_with_spans` 保 spans）→ 整章重写（仅 outline/length_over
+类结构性问题；常规 <70% 保留原版，length_over 压缩档下限换目标 ×0.85、spans 作废）；
+每轮复审（重跑 draft_review），**收敛守卫**：blocking 计数不再严格减少即停（P41 放宽：
+length_over 在压且正文严格变短时同数也收）、硬顶 MAX_REVISE，全程 best 跟踪（返回问题
+最少的那一版）。
 
 `deaify_if_needed`：定点去味（≤DEAIFY_ROUNDS 轮，`report.targets(20)` → `flavor_brief`
 → draft_deaify_edits，>1.8×+40 的过长改写丢弃，逐轮 `detect` 择优不劣化）→ 整章润色兜底
@@ -56,6 +58,7 @@ from harness.writing.pure import (
     apply_replace_issues,
     beat_index_at,
     is_keep_whole,
+    length_cap,
     locate_for_target,
     max_chars_deaify,
     max_chars_rewrite_beat,
@@ -121,6 +124,20 @@ def _length_issue(short: bool, words: int, target: int) -> dict:
                       "（逐拍写作没按每拍字数上限收敛，或该情节该拆成更多章）"),
             "suggestion": ("按每拍字数上限收紧明显超长的节拍（不整章注水/堆砌细节），"
                            "或在拆章阶段把该情节拆成更多章后再写。")}
+
+
+def _length_over_issue(words: int, target: int, cap: int) -> dict:
+    """超章长硬顶问题（P41；tools/writing.py `_length_over_issue` 同文案，依赖单向不互引）。
+
+    type=length_over ∈ FULL_REWRITE_TYPES → blocking，复审后仍超顶时重新生成，
+    驱动下一轮整章压缩；与 report-only 的 `_length_issue` 分工见 writing.py 注释。
+    """
+    return {"type": "length_over",
+            "issue": (f"字数超硬顶：本章硬顶 {cap} 字（目标约 {target} 字），"
+                      f"实际约 {words} 字——必须压缩到硬顶以内"),
+            "suggestion": (f"整章压缩到 {cap} 字以内：收紧明显超长的节拍、删并重复"
+                           "描写与冗余过渡，保留情节骨架与关键伏笔；不得砍成梗概"
+                           f"（低于约 {int(target * LENGTH_SHORT_FACTOR)} 字视为过度压缩）。")}
 
 
 def _edit_tuples(targets: list, edits: list) -> list[tuple[int, int, str]]:
@@ -246,12 +263,14 @@ async def _revise_by_beat(*, provider, llm, prompts, emit, doc, materials,
 
 
 async def _revise_whole(*, provider, llm, prompts, doc, materials,
-                        text: str, issues: list[dict],
+                        text: str, issues: list[dict], target_words: int,
                         meter: UsageMeter | None = None) -> tuple[str, None]:
     """整章重写（task.draft_revise，std/0.7 流式；seed 1171-1206）。
 
     max_chars 照 seed `_revise_whole`：`_stream_llm` 未传上限（None，靠 max_tokens 封顶）。
-    <70% 截断防护保留原版；整章重写 ⇒ 逐拍区间作废（返回 None，调用方/writing.py 置）。
+    截断防护分两档：常规（outline 等）新稿 <70% 保留原版；**length_over 压缩**（P41）
+    保留下限换成目标 ×0.85——真压缩必然远短于原稿（12000→4800 只剩 40%），按原稿 70%
+    判会把一切有效压缩误判成截断。整章重写 ⇒ 逐拍区间作废（返回 None，调用方/writing.py 置）。
     """
     tier, temp, mt = WRITING_ROUTING["task.draft_revise"]
     prompt = prompts.render(
@@ -264,10 +283,17 @@ async def _revise_whole(*, provider, llm, prompts, doc, materials,
         meter.add(use)   # usage 入账
     if reason:
         raise _RoundFailed(reason)
-    if new and text and not is_keep_whole(new, text):
-        log.warning("修正稿疑似被截断（%d 字 < 原稿 %d 字的 70%%），保留原稿",
-                    len(new), len(text))
-        new = text
+    if new and text:
+        if any(str(i.get("type")) == "length_over" for i in issues):
+            floor = int(target_words * LENGTH_SHORT_FACTOR)
+            if len(new) < floor:
+                log.warning("压缩稿过度（%d 字 < 目标下限 %d 字），保留原稿",
+                            len(new), floor)
+                new = text
+        elif not is_keep_whole(new, text):
+            log.warning("修正稿疑似被截断（%d 字 < 原稿 %d 字的 70%%），保留原稿",
+                        len(new), len(text))
+            new = text
     return new or text, None
 
 
@@ -292,15 +318,19 @@ async def _recheck(*, provider, llm, prompts, doc, materials, text: str,
     llm_issues = normalize_issues((data or {}).get("issues"))
     fixed, fixed_spans, issues = apply_replace_issues(text, spans, llm_issues)
     words = count_words(fixed)
+    cap = length_cap(target_words)
     if words < int(target_words * LENGTH_SHORT_FACTOR):
         issues = list(issues) + [_length_issue(True, words, target_words)]
+    elif words > cap:
+        # P41：超硬顶 → blocking（length_over），驱动下一轮整章压缩（同 writing.py ③）
+        issues = list(issues) + [_length_over_issue(words, target_words, cap)]
     elif words > int(target_words * LENGTH_LONG_FACTOR):
         issues = list(issues) + [_length_issue(False, words, target_words)]
     return fixed, fixed_spans, issues
 
 
 async def _revise_round(*, provider, llm, prompts, emit, doc, materials,
-                        body: str, spans, blocking: list[dict],
+                        body: str, spans, blocking: list[dict], target_words: int,
                         meter: UsageMeter | None = None
                         ) -> tuple[str, list | None]:
     """单轮三级修正（seed `_revise` 1066-1098）：返回 (新正文, 新区间|None)。
@@ -321,7 +351,8 @@ async def _revise_round(*, provider, llm, prompts, emit, doc, materials,
     if any(str(i.get("type")) in FULL_REWRITE_TYPES for i in remaining):
         return await _revise_whole(provider=provider, llm=llm, prompts=prompts,
                                    doc=doc, materials=materials, text=fixed,
-                                   issues=remaining, meter=meter)
+                                   issues=remaining, target_words=target_words,
+                                   meter=meter)
     log.info("按拍修复：%d 条意见定位不到节拍且非结构性，本轮不改写（如实上报）",
              len(remaining))
     return fixed, spans2
@@ -364,7 +395,7 @@ async def revise_until_converged(*, store: ProjectStore, llm: OpenAICompatClient
             new_body, new_spans = await _revise_round(
                 provider=provider, llm=llm, prompts=prompts, emit=emit, doc=doc,
                 materials=materials, body=cur_body, spans=cur_spans,
-                blocking=cur_blocking, meter=meter)
+                blocking=cur_blocking, target_words=target_words, meter=meter)
             new_body, new_spans, re_issues = await _recheck(
                 provider=provider, llm=llm, prompts=prompts, doc=doc,
                 materials=materials, text=new_body, spans=new_spans,
@@ -377,7 +408,13 @@ async def revise_until_converged(*, store: ProjectStore, llm: OpenAICompatClient
         cnt = len(re_blocking)
         revise_count += 1
         changed = new_body != cur_body
-        if cnt < best_count:
+        # P41：length_over（超硬顶）压缩途中计数不降是正常的（一条压一条）——只要正文
+        # **严格变短**就收下继续压（12000→6000→4800），否则收敛守卫第一轮就停在半路，
+        # 永远到不了硬顶以内。其余类型维持「计数未严格减少即停」原语义。
+        shorter = (cnt == best_count and cnt > 0
+                   and any(i.get("type") == "length_over" for i in cur_blocking)
+                   and len(new_body) < len(best_body))
+        if cnt < best_count or shorter:
             best_body, best_spans = new_body, new_spans
             best_blocking, best_issues = re_blocking, re_issues
             best_count = cnt

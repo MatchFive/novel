@@ -91,7 +91,7 @@ def test_draft_character_runs_in_main_loop_not_worker_thread(tmp_path):
     store = ProjectStore(info.path)
     script = [_call("draft_character", name="甲", role_type="protagonist"),
               CARD_JSON, _finish()]
-    loop, llm, events, state = make_char_loop(store, script)
+    loop, llm, events, _state = make_char_loop(store, script)
     result = asyncio.run(loop.run())
     assert result.status == "done"
     obs = _tool_results(events, "draft_character")
