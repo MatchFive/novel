@@ -151,6 +151,52 @@ def _unified_diff(path: str, old: str, new: str) -> str:
     return "\n".join(lines)
 
 
+def _world_is_empty(store: ProjectStore) -> bool:
+    """world.md 空档判定（B6）：文件不存在或解析不出任何 entry 块。
+
+    直接读文件 + `_parse_world` 纯函数，**不走 read_world**——坏档（或测试替换
+    read_world）时返回 False 不当空档：护档优先，维持「解析不到条目」跳过原语义。
+    """
+    world = store.root / "world.md"
+    if not world.exists():
+        return True
+    try:
+        _prefix, blocks = ProjectStore._parse_world(world.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return False
+    return not any(b[0] == "entry" for b in blocks)
+
+
+def _world_bootstrap_entries(content: str) -> list[dict]:
+    """空档首建折算（B6）：零 `###` 条目的提议 → 条目列表（可能为空=没什么可写）。
+
+    - 有 `##` 小节 → 每小节一个条目（标题=小节名，category=未分类；summary/content
+      分段复用 `_parse_world_entry` 同口径）；空小节（无摘要无正文）丢弃；
+    - 全无标题 → 单条「世界观总纲」（首个 `# ` 标题行作条目名并从正文剔除）。
+    """
+    _prefix, blocks = ProjectStore._parse_world(content)
+    entries: list[dict] = []
+    for b in blocks:
+        if b[0] != "cat":
+            continue
+        entry = ProjectStore._parse_world_entry("未分类", b[1], b[2])
+        if entry["summary"] or entry["content"]:
+            entries.append(entry)
+    if entries:
+        return entries
+    lines = content.split("\n")
+    title, body = "世界观总纲", lines
+    for i, ln in enumerate(lines):
+        if not ln.strip():
+            continue
+        if ln.startswith("# "):
+            title = ln[2:].strip() or title
+            body = lines[:i] + lines[i + 1:]
+        break
+    entry = ProjectStore._parse_world_entry("未分类", title, [f"### {title}"] + body)
+    return [entry] if (entry["summary"] or entry["content"]) else []
+
+
 def _apply(store: ProjectStore, prop: _Proposal) -> str | None:
     """经 store 写盘一个通过确认的文件；返回失败原因（跳过注记），成功返回 None。
 
@@ -173,6 +219,10 @@ def _apply(store: ProjectStore, prop: _Proposal) -> str | None:
             _prefix, blocks = ProjectStore._parse_world(prop.content)
             entries = [ProjectStore._parse_world_entry(cat, title, raw)
                        for cat, title, raw in (b[1:] for b in blocks if b[0] == "entry")]
+            if not entries and _world_is_empty(store):
+                # B6 空档首建：新项目 world.md 无条目 → 全量新建不跳过（## 小节折算
+                # 条目/纯散文折算单条总纲）；已有条目时零解析 = 提议格式坏了 → 维持跳过护档。
+                entries = _world_bootstrap_entries(prop.content)
             if not entries:
                 return "解析不到世界观条目"
             store.upsert_world_entries(entries)
@@ -340,10 +390,20 @@ async def edit_by_command(store: ProjectStore, llm: OpenAICompatClient, prompts:
     if _world_targets(instruction):
         from harness.world_variation import variation_block
         coord_block = variation_block(store.root)
+    # B6 提示词层：world 空档时模型在【文件现状】里看不到条目格式样例 → 提议 freeform
+    # 散文 → 应用层零解析（改前=整文件跳过死锁）。空档 + 世界观目标时补上格式契约块，
+    # 从源头减少 freeform 提议（与应用层 _world_bootstrap_entries 折算兜底双保险）。
+    world_fmt_block = ""
+    if _world_targets(instruction) and _world_is_empty(store):
+        world_fmt_block = (
+            "\n\n【world.md 条目格式】world.md 当前为空，新建条目必须用这个结构：\n"
+            "## 分类名\n### 条目标题\n- 重要度：高/中/低\n\n"
+            "首段=一句话摘要，空行后=正文详情。每个条目一个 ### 块；"
+            "不写 ### 条目的散文提议会被折算成单条总纲条目（分类结构丢失）。")
     prompt = prompts.render("task.auto_modify_propose",
                             files=_render_snapshot(snapshot), instruction=instruction) \
         + skill_injection(store.root, "task.auto_modify_propose") \
-        + ref_block + coord_block
+        + ref_block + coord_block + world_fmt_block
     fail_reason = ""
 
     def _extract(text: str):

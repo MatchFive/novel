@@ -783,3 +783,80 @@ def test_ref_check_broken_world_does_not_break_edit(store, make_llm, monkeypatch
     assert len(calls) == 1                      # 预检跳过，只发 propose
     assert _FakeRefService.instances == []
     assert "失败（" not in result.text          # 非阻断
+
+
+# ---------- P42（B6）：world.md 空档首条目创建 ----------
+
+
+def test_world_bootstrap_sections_become_entries(store, make_llm):
+    """B6：world.md 空档（create_project 只写 `# 世界观\\n`）+ 提议零 ### 条目但有
+    ## 小节 → 不再整文件跳过：每小节折算一个条目落盘，read_world 可读回。"""
+    content = ("# 世界观\n\n## 地理\n\n补丁大地，九块大陆。\n\n"
+               "## 修炼体系\n\n以技艺为媒，代价是记忆。\n")
+    edits = json.dumps([{"path": "world.md", "content": content}], ensure_ascii=False)
+    llm, _ = make_llm([edits])
+    ui = FakeUI(choice=Choice(indices=[0]))
+    reg = make_registry(store, llm, ui)
+    obs = reg.execute("edit_by_command", {"instruction": "建立世界观"},
+                      allowed=frozenset({"edit_by_command"}))
+    assert "已应用 1 个文件" in obs
+    assert "跳过" not in obs
+    entries = store.read_world()
+    assert [e["title"] for e in entries] == ["地理", "修炼体系"]
+    assert entries[0]["summary"] == "补丁大地，九块大陆。"
+    assert entries[1]["summary"] == "以技艺为媒，代价是记忆。"
+
+
+def test_world_bootstrap_no_headings_single_overview_entry(store, make_llm):
+    """B6：提议连标题都没有（纯散文）→ 折算单条「世界观总纲」，正文不丢。"""
+    content = "这是一个剑与魔法的世界，人们以符文为力量之源。"
+    edits = json.dumps([{"path": "world.md", "content": content}], ensure_ascii=False)
+    llm, _ = make_llm([edits])
+    ui = FakeUI(choice=Choice(indices=[0]))
+    reg = make_registry(store, llm, ui)
+    obs = reg.execute("edit_by_command", {"instruction": "建立世界观"},
+                      allowed=frozenset({"edit_by_command"}))
+    assert "已应用 1 个文件" in obs
+    entries = store.read_world()
+    assert len(entries) == 1
+    assert entries[0]["title"] == "世界观总纲"
+    assert entries[0]["summary"] == content
+
+
+def test_world_zero_parse_with_existing_entries_still_skipped(store, make_llm):
+    """B6 护档语义不变：world.md **已有条目**时零解析提议 = 格式坏了 → 维持跳过，
+    既有条目一字不动。"""
+    store.upsert_world_entries([{"title": "地理", "category": "地理", "summary": "旧设定",
+                                 "content": "", "importance": "中"}])
+    before = (store.root / "world.md").read_bytes()
+    edits = json.dumps([{"path": "world.md", "content": "随便一段没有条目的散文。"}],
+                       ensure_ascii=False)
+    llm, _ = make_llm([edits])
+    ui = FakeUI(choice=Choice(indices=[0]))
+    reg = make_registry(store, llm, ui)
+    obs = reg.execute("edit_by_command", {"instruction": "改世界观"},
+                      allowed=frozenset({"edit_by_command"}))
+    assert "跳过：world.md（解析不到世界观条目）" in obs
+    assert (store.root / "world.md").read_bytes() == before
+
+
+def test_world_bootstrap_prompt_shows_entry_format_when_empty(store, make_llm):
+    """B6 提示词层：world 空档 + 世界观目标 instruction → propose 提示词带
+    【world.md 条目格式】契约块（从源头减少 freeform 提议）；已有条目则不带。"""
+    edits = json.dumps([{"path": "world.md", "content": "散文。"}], ensure_ascii=False)
+    llm, calls = make_llm([edits])
+    ui = FakeUI(choice=Choice(indices=[0]))
+    reg = make_registry(store, llm, ui)
+    reg.execute("edit_by_command", {"instruction": "建立世界观"},
+                allowed=frozenset({"edit_by_command"}))
+    prompt = calls[0]["messages"][-1]["content"]
+    assert "【world.md 条目格式】" in prompt
+    assert "### " in prompt
+
+    store.upsert_world_entries([{"title": "地理", "category": "地理", "summary": "旧",
+                                 "content": "", "importance": "中"}])
+    llm2, calls2 = make_llm([edits])
+    reg2 = make_registry(store, llm2, ui)
+    reg2.execute("edit_by_command", {"instruction": "改世界观"},
+                 allowed=frozenset({"edit_by_command"}))
+    assert "【world.md 条目格式】" not in calls2[0]["messages"][-1]["content"]
